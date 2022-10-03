@@ -46,8 +46,6 @@
 \DeclareMathOperator{\vecSpan}{span}
 
 \DeclarePairedDelimiter{\norm}{\lVert}{\rVert}
-%\DeclarePairedDelimiter{\Var}{\VarStr[}{]}
-%\DeclarePairedDelimiter{\Cov}{\CovStr}{]}
 \DeclarePairedDelimiterXPP\Var[1]{\VarStr}(){}{#1}
 \DeclarePairedDelimiterXPP\Cov[1]{\CovStr}(){}{#1}
 \DeclarePairedDelimiterXPP\E[1]{\EStr}(){}{#1}
@@ -65,16 +63,17 @@
 
 \section{Introduction}
 
-Mass matrix is critical for sampler performance...
+The choice of mass matrix is known to be critical for the performance of HMC
+samplers. Mass matrices are usually adapted during tuning, and convergence
+speed to a good mass matrix has a big impact on the total cost of posterior
+sampling as well.
 
-Adapt mass matrix during tuning based on first samples...
-
-In the case of normal posterior $N(\mu, \Sigma)$ we use the condition number of
-$\Sigma$ as an estimate of how difficult it would be to sample from this
-posterior with an identity mass matrix.
+In the case of normal posterior $N(\mu, \Sigma)$ we can use the condition
+number of $\Sigma$ as an estimate of how difficult it is to sample from
+this posterior with an identity mass matrix.
 
 \[
-\kappa(\Sigma) = \frac{\min{\eigvals(\Sigma)}}{\max{\eigvals(\Sigma)}}
+\kappa(\Sigma) = \frac{\max{\eigvals(\Sigma)}}{\min{\eigvals(\Sigma)}}
 \]
 
 If we use a mass matrix $\hat{\Sigma}^{-1}$, we can compute the
@@ -82,38 +81,18 @@ condition number seen by the sampler as
 
 \[
 \kappa(\Sigma, \hat{\Sigma})
-  = \frac{\min{\eigvals(\Sigma, \hat\Sigma)}}{\max{\eigvals(\Sigma, \hat\Sigma)}},
+  = \frac{\max{\eigvals(\Sigma, \hat\Sigma)}}{\min{\eigvals(\Sigma, \hat\Sigma)}},
 \]
 
 where $\eigvals(\Sigma, \hat\Sigma)$ refers to the generalized eigenvalues of
 $\Sigma$ with respect to $\hat\Sigma$.
 
-A better estimate can be found here,
-\url{https://arxiv.org/pdf/1905.09813.pdf}, but for our purposes the simpler
-condition number will do fine.
+A better estimate can be found
+here\footnote{\url{https://arxiv.org/pdf/1905.09813.pdf}}, but for our purposes
+the simpler condition number will do fine.
 
 Currently, most implementations (at least Stan + PyMC) use a regularized
 version of the empirical covariance or its diagonal as inverse mass matrix.
-(mention normalizing flows etc. based on ADVI?)
-
-%In the following we use
-%\[
-%  \kappa_1(\Sigma) = d(\Sigma, I) = \norm{\log(\eigvals(\Sigma))}.
-%\]
-
-
-%Choosing a different mass matrix is equivalent to sampling in the coordinate
-%system defined by the scaled eigenvectors of the inverse mass matrix, so
-%for an inverse mass matrix $\hat{\Sigma}$ we find
-
-%\[
-%  \kappa_1(\hat{\Sigma}| \Sigma)
-%    = d(\hat{\Sigma}, \Sigma)
-%    = \lVert \log(\eigvals(\hat{\Sigma}, \Sigma) \rVert,
-%\]
-
-%where $\eigvals(\hat{\Sigma}, \Sigma)$ are the generalized eigenvalues of
-%$\hat{\Sigma}$ with respect to $\Sigma$.
 
 \subsection{Use gradients of posterior log density}
 
@@ -227,7 +206,7 @@ the empirical covariance of the gradients.
 \end{thm}
 
 \begin{proof}
-See appendix. (TODO)
+See appendix.
 \end{proof}
 
 So if we interpret both $\Cov{X}$ and $\Cov{\nabla \log(p(X))}^{-1}$ as
@@ -285,10 +264,80 @@ posteriors.
 The final part will investigate further generalizations to non-linear
 transformations using neural networks.
 
-\iffalse
-\section{Unsorted}
+\section{Diagonal mass matrix}
+
+Build mass matrix based on the corrected standard deviations
+
+\[
+\sigma = \left[\frac{\Var{X_i}}{\Var{\nabla \log(p(X_i)}}\right]^{1/4}.
+\]
+
+\begin{itemize}
+\item Show better condition number (from paper) of this mass matrix estimate
+\item Show faster convergence during early tuning
+\item Show ess/grad in a few real models
+\item Overall better performance of nutpie compared to stan/PyMC sampler
+implementations
+\end{itemize}
+
+\section{Mass matrix with correlation structure}
+
+Discuss some simple regularizers (is $tr(\Sigma) + tr(\Omega)$), even though
+they don't seem to work all that well?
+
+Discuss projection onto $\vecSpan(X, \nabla X)$, to reduce from $O(n^2)$ to $O(k^2)$.
+
+Large influence of diagonal in many actual models, i.e. scale draws first?
+
+Add epsilon to 0 eigvals trick?
+
+Finally, the one implemented in covadapt: Matrix representation as $D(U(\Lambda
+- I)U^T + I)D$, so that we can avoid strong regularization on $D$ but have
+regularization on $\Lambda$, and $\Lambda$ can be much smaller than $n\times
+n$, so we avoid quadratic cost: only fix a few eigenvector, eigenvalue
+combinations, that cause the biggest trouble.
+
+But we actually have to solve the minimizing problem, where we use natural
+gradient decent. The parameter space is $\log(d), U, \log(\lambda) \in \mathbb{R}^n
+\times \text{Stiefel}^k \times \mathbb{R}^k$. We have a natural metric, because each
+point in parameter space refers to a probability distribution (information
+geometry, fisher metric). We can find gradient with respect to that metric and
+run manifold minimization.
+
+The resulting algorithm: Initialize mass matrix, draw a few samples, run a few
+optimization iterations and update mass matrix, repeat...
+
+Show results from a couple of models (e.g. GP where we often have correlations).
+
+\section{Non-linear transformations}
+
+We need to parameterize transformations $\phi$. There is some literature on
+how to do that with neural networks, I don't know that too well though.
+
+Came up with this so far (which does seem to work quite well?):
+
+Use a bijective neural network directly as transformation.
+
+Activation function based on $\text{act}(x) = (1 - α)\log(1 + x) + αx$ for positive, inverse
+(based on lambert W function) for negative values of $x$. This leads to nice
+nonlinearity, but avoids overflows and underflows.
+
+Each layer is $\text{act}(DA_vx + b)$, where $D$ diagonal, and $A_v = I
++ (1 - \norm{v}^{-2})vv^T$, such that all eigenvalues are one
+except one with eigenvector $v$ and eigenvalue $\norm{v}^2$.
+
+This means that each jacobian determinant is easy to compute, and we can easily
+compute the objective $\hat F$.
+
+Optimization can use SGD or maybe Levenberg–Marquardt with iterative matrix
+solve using CG or so? Current implementation is a very messy notebook with some
+jax code\dots
+
+\section*{Appendix}
 
 \begin{proof}
+TODO
+\iffalse
 Assuming $q = N(\hat{\mu}, \hat{\Sigma})$ and differentiating by $\hat{\mu}$ and
 a symmetric $\hat{\Sigma}$ gives us
 
@@ -303,100 +352,9 @@ P &= \Cov{\nabla \log p(\theta_i), \theta_i} \\
 C &= \Cov{\theta_i, \theta_i} \\
 \overline{y_i} &= \frac{1}{N}\sum_i y_i
 \end{align*}
-\end{proof}
 
-The Lyapunov equation for $\hat{\Sigma}$ has a symmetric positive definite solution if
-$C$ is positive definite and $P$ has only unique negative eigenvalues (ref?).
-Those conditions are satisfied when $p$ is a normal distribution and $N >
-\dim(\theta)$. *In this case $\hat{\Sigma}$ is exactly $\Sigma$, even if
-the draws $x_i$ are not from the posterior distribution*. (I don't have a
-proper proof yet, works out numerically though, and I think it shouldn't be too
-hard to do? (last words\ldots))
-
-So this completely solves the case where the posterior distribution is exactly Gaussian,
-and we have more draws than dimensions.
-
-\section{Some closed form solutions}
-
-\subsection{Diagonal covariance}
-
-If we restrict $q$ to a normal distribution with diagonal covariance, we find
-
-$$
-\hat{\Sigma}_{ii} = \sqrt{\frac{C_{ii}}{P_{ii}}}.
-$$
-
-If $p$ happens to also be a normal distribution with diagonal covariance, this
-estimate will be exact as soon as we have more than one draw.
-
-\subsection{Full covariance}
-\subsubsection{Number of draws larger than posterior dimension}
-
-The solution of (?) is the true covariance.
-
-\subsubsection{Number of draws smaller than posterior dimension}
-
-Here we run into issues when solving the Lyapunov equation, because $P$ and $C$ both
-have eigenvalues that are zero.
-
-I don't have a good theoretical framework for dealing with this, but after some
-experimentation I think I found a solution that works reasonably well in
-practice (it outperformed all other ideas I tried for all covariance matrices I
-tried (see notebook)).
-
-We first estimate a diagonal matrix
-\[
-\diag(D) = \sqrt{\frac{\hat{\Var{\theta_i}}}{\hat{\Var{\nabla \log p(\theta_i)}}}}.
-\]
-
-The intuition behind this is that large posterior variance implies large
-variance of the samples, but also small variance of the gradients. (By the way,
-using this as a diagonal inverse mass matrix seems to outperform the diagonal
-mass matrix based only on the samples in most cases, even without further
-modifications that follow).
-
-We then compute $P'$ and $C'$ based on scaled versions of gradients and draws
-($\theta' = \theta D^{1/2}, \nabla \log p' = \nabla \log p D^{-1/2}$).
-We then use an eigenvalue decomposition and SVD respectably to set eigenvalues
-that are $\leq 0$ in the case of $C'$ and eigenvalues that are $\geq 0$ in the case
-of $P'$ to a small positive (for $C'$) or negative (for $P'$) number $\epsilon$.
-
-This preserves the property of fitting a normal distribution exactly when we have
-more draws than dimensions, but allows us to still get good (but maybe not ideal)
-estimates if we have fewer samples.
-
-\subsubsection{More expensive but better(?) solution}
-
-Write mass matrix as $D(U(\Sigma - I)U^T + I)D$ and use natural gradient decent to
-minimize fisher divergence.
-
-\subsection{Non-Gaussian posterior}
-
-I don't know of any method to evaluate different choices for the mass matrix
-that trying a bunch of models with each and comparing the ESS per gradient
-evaluation.
-
-In some experiments that I did this new mass matrix or the $D$ defined above
-performed similar or better for most posteriors.
-
-\subsection{Computational cost}
-
-We have to consider the cost of finding the mass matrix, which in a windowed tuning
-method we have to do only a few times, and the cost of leapfrog and momentum resampling.
-
-The cost to compute $\hat{\Sigma}$ is dominated by solving the Lyapunov
-equation, for which I currently use the Bartels-Stewart algorithm with $15n^3$
-flops as implemented in scipy.
-
-We then have to do matrix vector multiplications with $O(n^2)$ operations in
-each leapfrog step. If $n$ is large we can reduce this by further approximating
-$\hat{\Sigma} \approx D^{1/2}(U\hat{\Sigma}'U^T + (I - UU^T))D^{1/2}$, where $U\in
-\mathbb{R}^{n\times k}$ are the largest and smallest eigenvectors of the
-correlation matrix. This reduces the cost to $O(kn)$.
-
-It might also be possible to use Krylov methods to directly estimate $U$ and the
-corresponding eigenvalues instead of solving the complete Lyapunov equation.
-
+TODO\dots
 \fi
+\end{proof}
 
 \end{document}
