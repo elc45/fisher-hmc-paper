@@ -1,0 +1,402 @@
+\documentclass{scrartcl}
+
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsthm}
+\usepackage{mathtools}
+
+%\usepackage[urw-garamond]{mathdesign}
+%\usepackage{notomath}
+%\usepackage{newpxtext,newpxmath}
+%\usepackage{garamondx}
+%\usepackage[garamondx,cmbraces]{newtxmath}
+%\usepackage{libertinus}
+
+\usepackage[math-style=ISO, bold-style=ISO]{unicode-math}
+%\usepackage[math-style=TeX, bold-style=TeX]{unicode-math}
+
+\setmainfont{EB Garamond}
+\setmathfont{Garamond-Math.otf}[StylisticSet={2,7,9}]
+\addtokomafont{disposition}{\rmfamily}
+
+
+%\usepackage[T1]{fontenc}
+%\usepackage{mlmodern}
+%\usepackage{lmodern}
+\usepackage[english]{babel}
+%\usepackage[nocolor]{hyperref}
+%\usepackage{lualatex-math}
+\usepackage{hyperref}
+
+\usepackage{xcolor}
+\hypersetup{
+    colorlinks,
+    linkcolor={red!50!black},
+    citecolor={blue!50!black},
+    urlcolor={blue!80!black}
+}
+
+\DeclareMathOperator{\eigvals}{eigvals}
+\DeclareMathOperator{\diag}{diag}
+\DeclareMathOperator{\CovStr}{Cov}
+\DeclareMathOperator{\VarStr}{Var}
+\DeclareMathOperator{\EStr}{E}
+\DeclareMathOperator*{\argmax}{arg\,max}
+\DeclareMathOperator*{\argmin}{arg\,min}
+\DeclareMathOperator{\vecSpan}{span}
+
+\DeclarePairedDelimiter{\norm}{\lVert}{\rVert}
+%\DeclarePairedDelimiter{\Var}{\VarStr[}{]}
+%\DeclarePairedDelimiter{\Cov}{\CovStr}{]}
+\DeclarePairedDelimiterXPP\Var[1]{\VarStr}(){}{#1}
+\DeclarePairedDelimiterXPP\Cov[1]{\CovStr}(){}{#1}
+\DeclarePairedDelimiterXPP\E[1]{\EStr}(){}{#1}
+
+\newtheorem{thm}{Theorem}
+\newtheorem{cor}{Corollary}
+
+\title{Fisher Divergence for mass matrix adaptation}
+\author{Adrian Seyboldt}
+
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+
+Mass matrix is critical for sampler performance...
+
+Adapt mass matrix during tuning based on first samples...
+
+In the case of normal posterior $N(\mu, \Sigma)$ we use the condition number of
+$\Sigma$ as an estimate of how difficult it would be to sample from this
+posterior with an identity mass matrix.
+
+\[
+\kappa(\Sigma) = \frac{\min{\eigvals(\Sigma)}}{\max{\eigvals(\Sigma)}}
+\]
+
+If we use a mass matrix $\hat{\Sigma}^{-1}$, we can compute the
+condition number seen by the sampler as
+
+\[
+\kappa(\Sigma, \hat{\Sigma})
+  = \frac{\min{\eigvals(\Sigma, \hat\Sigma)}}{\max{\eigvals(\Sigma, \hat\Sigma)}},
+\]
+
+where $\eigvals(\Sigma, \hat\Sigma)$ refers to the generalized eigenvalues of
+$\Sigma$ with respect to $\hat\Sigma$.
+
+A better estimate can be found here,
+\url{https://arxiv.org/pdf/1905.09813.pdf}, but for our purposes the simpler
+condition number will do fine.
+
+Currently, most implementations (at least Stan + PyMC) use a regularized
+version of the empirical covariance or its diagonal as inverse mass matrix.
+(mention normalizing flows etc. based on ADVI?)
+
+%In the following we use
+%\[
+%  \kappa_1(\Sigma) = d(\Sigma, I) = \norm{\log(\eigvals(\Sigma))}.
+%\]
+
+
+%Choosing a different mass matrix is equivalent to sampling in the coordinate
+%system defined by the scaled eigenvectors of the inverse mass matrix, so
+%for an inverse mass matrix $\hat{\Sigma}$ we find
+
+%\[
+%  \kappa_1(\hat{\Sigma}| \Sigma)
+%    = d(\hat{\Sigma}, \Sigma)
+%    = \lVert \log(\eigvals(\hat{\Sigma}, \Sigma) \rVert,
+%\]
+
+%where $\eigvals(\hat{\Sigma}, \Sigma)$ are the generalized eigenvalues of
+%$\hat{\Sigma}$ with respect to $\Sigma$.
+
+\subsection{Use gradients of posterior log density}
+
+This means however, that we do not use an additional source of information that
+we have available anyway: the gradients of the posterior log density at the
+positions of the draws.
+
+Since the gradients transform covariantly, where the draws transform
+contravariantly, the covariance of gradients is the inverse covariance matrix
+for a Gaussian posterior. This indicates that the covariance of the gradients
+gives us an estimate for $\Sigma^{-1}$, while the variance of the draws
+themselves gives an estimate for $\Sigma$. If we have few draws compared to the
+dimensionality of the problem, the empirical covariances therefore contain
+information about the large and small eigenvalues of the true covariance of the
+posterior respectably. But since both of those are important for a good mass
+matrix, it stands to reason that we can use the gradient information to improve
+mass matrix estimates.
+
+Estimates of the variance with only the draws are also limited by the
+Cramér-Rao bound, which is no longer the case if we consider additional
+information. For instance, for a 1D Gaussian posterior one draw with its
+gradient is already enough to uniquely identify the posterior distribution, and
+as we will see it also provides a lot of information about the posterior in the
+higher dimensional case.
+
+\subsection{Fisher Divergence}
+
+Choosing a mass matrix is equivalent to fitting a normal distribution to the
+posterior, where the inverse covariance matrix of the fitted distribution is
+the mass matrix.
+
+A natural way to incorporate the gradient information into this covariance
+estimation is by minimizing the fisher divergence (see e.g.
+\url{https://arxiv.org/pdf/1905.05284.pdf}) between our estimated normal
+distribution with density $q$ the actual posterior distribution with density
+$p$:
+
+\[
+  F(p, q)
+    = \int \lVert \nabla \log p(\theta)
+      - \nabla \log q(\theta)\rVert^2 p(\theta)d\theta
+\]
+
+It is not immediately obvious which norm we should use here. A natural choice
+becomes apparent if we remember that the mass matrix as used in HMC itself
+defines a norm on the tangent parameter space. We propose to use this norm,
+which means that we are looking for a distribution with density $q$ who's
+gradients are close to the gradients of the target distribution $p$ \emph{as
+seen by the sampler}:
+
+$$
+  F(p, q)
+    = \int \lVert \nabla \log p(\theta)
+      - \nabla \log q(\theta)\rVert_{\hat\Sigma}^2 p(\theta)d\theta
+$$
+
+Where the norm on the tangent space is given by $\lVert x\lVert_{\hat\Sigma}^2
+= x^T \hat\Sigma x$, where $\hat\Sigma$ is the covariance of our fitted
+distribution $q$.
+
+This is equivalent to finding an affine transformation $\phi(x) = Ax + \mu$
+such that
+
+\[
+F(\phi)
+  = \int \lVert \nabla \log p_\phi(\theta)
+    - \nabla \log N(x \mid 0, 1) \rVert^2 p(\theta) d\theta
+\]
+is minimal, where $p_\phi(\theta) = \lvert J_\phi\rvert^{1/2} p(\phi(\theta))$
+is the transformed density and $AA^T = \hat\Sigma$ corresponds to the
+covariance of our fitted Gaussian distribution, or the inverse mass matrix.
+
+This definition is now valid for arbitrary families of diffeomorphisms $\phi$.
+
+During sampling we have $N$ draws $\theta_i$ and gradients $\nabla \log
+p(\theta_i)$, so we approximate $F$ by its Monte Carlo estimate:
+
+\[
+\hat{F}(p, q)
+  = \frac{1}{N} \sum_i \lVert \nabla p(\theta_i)
+    - \nabla q(\theta_i)\rVert^2_\Sigma
+\]
+
+or
+\[
+\hat{F}(\phi)
+  = \frac{1}{N} \sum_i
+    \norm{\nabla \log p_\phi(\theta_i) - \nabla \log N(\theta_i \mid 0, 1)}
+\]
+
+\subsection{Properties of minimization problem}
+
+\begin{thm}
+If $\phi_{\mu, A} = Ax + \mu$ and $X$ with density $p$ is such that $\Cov{X}$
+and $\Cov{\nabla \log(p(X))}$ exist and are positive definite, then
+$F(\phi_{\mu, A})$ is minimal iff $\mu = \E{X}$ and $AA^T$ is the
+geodesic mean of $\Cov{X}$ and $\Cov{\nabla \log(p(X))}^{-1}$.
+
+Put differently, $AA^T$ is such that
+\[
+d(\Cov{X}, AA^T) + d(AA^T, \Cov{\nabla\log(p(X))}^{-1}),
+\]
+is minimal, where $d(\Sigma, \Omega) = \norm{\log(\eigvals(\Sigma, \Omega))}$
+is the geodesic distance of symmetric positive definite matrices
+$\Sigma$ and $\Omega$ with respect to the intrinsic metric.
+
+$\hat{F}$ is minimal for all $A$ with $\hat{\Sigma} AA^T\hat{\Sigma} =
+\hat{\Omega}$, where $\hat{\Sigma} = \Cov{X_i}$ is the empirical
+covariance of the draws and $\hat{\Omega} = \Cov{\nabla \log(p(X_i))}$ is
+the empirical covariance of the gradients.
+\end{thm}
+
+\begin{proof}
+See appendix. (TODO)
+\end{proof}
+
+So if we interpret both $\Cov{X}$ and $\Cov{\nabla \log(p(X))}^{-1}$ as
+possible choices for the inverse mass matrix, minimizing $F$ leads to the mean
+of those two choices. If we have more dimensions than draws, this minimum (or
+mean) is not unique however, so we will need regularization of some kind in
+order to find a unique mass matrix estimate.
+
+\begin{cor}
+If $\phi$ is as above and additionally $X ~ \sim N(\mu', \Sigma')$,
+then the minimum of $F$ is at $\mu = \mu'$ and $\Sigma = \Sigma'$, because in
+this case $\Cov{X} = \Cov{\nabla \log(p)}^{-1}$.
+
+Let $k$ be the number of draws in $n$ dimensions and let $\hat A$ be the linear
+part of the minimizer of $\hat F$. Then there exists a $k$-dimensional
+subspace of $\vecSpan(X_i, \nabla\log p(X_i))$ in which $\hat A\hat A^T$
+matches the true covariance $\Sigma$ exactly.
+\end{cor}
+
+This means if our posterior is a Gaussian, we get better estimates for the mass
+matrix the more draws we have, and if we have more draws than dimensions our
+mass matrix estimate will be perfect.
+
+\begin{cor}
+Given a space of transformation $\phi_{\mu, \sigma}(X) = \mu + \sigma \odot X$
+(this corresponds to diagonal mass matrices) $F$ is minimal if $\mu =
+E_p[X]$ and $\sigma^2 = \sqrt{\frac{\Var{X}}{\Var{\nabla \log(p(X))}}}$
+and
+
+\[
+\sigma
+  = \argmin_{\sigma} d(\Cov{X}, \diag(\sigma)^2)
+    + d(\diag(\sigma)^2, \Cov{\nabla\log(p(X))}^{-1}),
+\]
+
+$\hat F$ is minimal if
+\[
+\sigma^2 = \sqrt{\frac{\Var{X_i}}{\Var{\nabla \log(p(X_i)}}}.
+\]
+\end{cor}
+
+This last result motivates a simple modification of the status quo diagonal
+mass matrix adaptation. Instead of adapting based on the marginal variance of
+each parameter, we adapt based on the geometric mean of the marginal variance
+and inverse marginal variance of the gradients.
+
+In the next part of this paper we will investigate this modification in more
+detail, and compare an implementation of it in nutpie with the current default
+choice.
+
+In later parts we will show how we can develop the ideas further for
+sub-quadratic mass matrix adaptation that still can deal with highly correlated
+posteriors.
+
+The final part will investigate further generalizations to non-linear
+transformations using neural networks.
+
+\iffalse
+\section{Unsorted}
+
+\begin{proof}
+Assuming $q = N(\hat{\mu}, \hat{\Sigma})$ and differentiating by $\hat{\mu}$ and
+a symmetric $\hat{\Sigma}$ gives us
+
+\begin{align*}
+\hat{\mu} &= \hat{\Sigma}\overline{\nabla \log p(\theta_i)} + \overline{\theta_i}
+C &= \hat{\Sigma}P\hat{\Sigma} \\
+\end{align*}
+
+where
+\begin{align*}
+P &= \Cov{\nabla \log p(\theta_i), \theta_i} \\
+C &= \Cov{\theta_i, \theta_i} \\
+\overline{y_i} &= \frac{1}{N}\sum_i y_i
+\end{align*}
+\end{proof}
+
+The Lyapunov equation for $\hat{\Sigma}$ has a symmetric positive definite solution if
+$C$ is positive definite and $P$ has only unique negative eigenvalues (ref?).
+Those conditions are satisfied when $p$ is a normal distribution and $N >
+\dim(\theta)$. *In this case $\hat{\Sigma}$ is exactly $\Sigma$, even if
+the draws $x_i$ are not from the posterior distribution*. (I don't have a
+proper proof yet, works out numerically though, and I think it shouldn't be too
+hard to do? (last words\ldots))
+
+So this completely solves the case where the posterior distribution is exactly Gaussian,
+and we have more draws than dimensions.
+
+\section{Some closed form solutions}
+
+\subsection{Diagonal covariance}
+
+If we restrict $q$ to a normal distribution with diagonal covariance, we find
+
+$$
+\hat{\Sigma}_{ii} = \sqrt{\frac{C_{ii}}{P_{ii}}}.
+$$
+
+If $p$ happens to also be a normal distribution with diagonal covariance, this
+estimate will be exact as soon as we have more than one draw.
+
+\subsection{Full covariance}
+\subsubsection{Number of draws larger than posterior dimension}
+
+The solution of (?) is the true covariance.
+
+\subsubsection{Number of draws smaller than posterior dimension}
+
+Here we run into issues when solving the Lyapunov equation, because $P$ and $C$ both
+have eigenvalues that are zero.
+
+I don't have a good theoretical framework for dealing with this, but after some
+experimentation I think I found a solution that works reasonably well in
+practice (it outperformed all other ideas I tried for all covariance matrices I
+tried (see notebook)).
+
+We first estimate a diagonal matrix
+\[
+\diag(D) = \sqrt{\frac{\hat{\Var{\theta_i}}}{\hat{\Var{\nabla \log p(\theta_i)}}}}.
+\]
+
+The intuition behind this is that large posterior variance implies large
+variance of the samples, but also small variance of the gradients. (By the way,
+using this as a diagonal inverse mass matrix seems to outperform the diagonal
+mass matrix based only on the samples in most cases, even without further
+modifications that follow).
+
+We then compute $P'$ and $C'$ based on scaled versions of gradients and draws
+($\theta' = \theta D^{1/2}, \nabla \log p' = \nabla \log p D^{-1/2}$).
+We then use an eigenvalue decomposition and SVD respectably to set eigenvalues
+that are $\leq 0$ in the case of $C'$ and eigenvalues that are $\geq 0$ in the case
+of $P'$ to a small positive (for $C'$) or negative (for $P'$) number $\epsilon$.
+
+This preserves the property of fitting a normal distribution exactly when we have
+more draws than dimensions, but allows us to still get good (but maybe not ideal)
+estimates if we have fewer samples.
+
+\subsubsection{More expensive but better(?) solution}
+
+Write mass matrix as $D(U(\Sigma - I)U^T + I)D$ and use natural gradient decent to
+minimize fisher divergence.
+
+\subsection{Non-Gaussian posterior}
+
+I don't know of any method to evaluate different choices for the mass matrix
+that trying a bunch of models with each and comparing the ESS per gradient
+evaluation.
+
+In some experiments that I did this new mass matrix or the $D$ defined above
+performed similar or better for most posteriors.
+
+\subsection{Computational cost}
+
+We have to consider the cost of finding the mass matrix, which in a windowed tuning
+method we have to do only a few times, and the cost of leapfrog and momentum resampling.
+
+The cost to compute $\hat{\Sigma}$ is dominated by solving the Lyapunov
+equation, for which I currently use the Bartels-Stewart algorithm with $15n^3$
+flops as implemented in scipy.
+
+We then have to do matrix vector multiplications with $O(n^2)$ operations in
+each leapfrog step. If $n$ is large we can reduce this by further approximating
+$\hat{\Sigma} \approx D^{1/2}(U\hat{\Sigma}'U^T + (I - UU^T))D^{1/2}$, where $U\in
+\mathbb{R}^{n\times k}$ are the largest and smallest eigenvectors of the
+correlation matrix. This reduces the cost to $O(kn)$.
+
+It might also be possible to use Krylov methods to directly estimate $U$ and the
+corresponding eigenvalues instead of solving the complete Lyapunov equation.
+
+\fi
+
+\end{document}
