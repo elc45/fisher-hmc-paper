@@ -5,11 +5,6 @@
 \usepackage{amsthm}
 \usepackage{mathtools}
 
-%\usepackage[urw-garamond]{mathdesign}
-%\usepackage{notomath}
-%\usepackage{newpxtext,newpxmath}
-%\usepackage{garamondx}
-%\usepackage[garamondx,cmbraces]{newtxmath}
 %\usepackage{libertinus}
 
 \usepackage[math-style=ISO, bold-style=ISO]{unicode-math}
@@ -19,13 +14,7 @@
 \setmathfont{Garamond-Math.otf}[StylisticSet={2,7,9}]
 \addtokomafont{disposition}{\rmfamily}
 
-
-%\usepackage[T1]{fontenc}
-%\usepackage{mlmodern}
-%\usepackage{lmodern}
 \usepackage[english]{babel}
-%\usepackage[nocolor]{hyperref}
-%\usepackage{lualatex-math}
 \usepackage{hyperref}
 
 \usepackage{xcolor}
@@ -44,11 +33,12 @@
 \DeclareMathOperator*{\argmax}{arg\,max}
 \DeclareMathOperator*{\argmin}{arg\,min}
 \DeclareMathOperator{\vecSpan}{span}
+\DeclareMathOperator{\jacdet}{jacdet}
 
 \DeclarePairedDelimiter{\norm}{\lVert}{\rVert}
-\DeclarePairedDelimiterXPP\Var[1]{\VarStr}(){}{#1}
-\DeclarePairedDelimiterXPP\Cov[1]{\CovStr}(){}{#1}
-\DeclarePairedDelimiterXPP\E[1]{\EStr}(){}{#1}
+\DeclarePairedDelimiterXPP{\Var}[1]{\VarStr}(){}{#1}
+\DeclarePairedDelimiterXPP{\Cov}[1]{\CovStr}(){}{#1}
+\DeclarePairedDelimiterXPP{\E}[1]{\EStr}(){}{#1}
 
 \newtheorem{thm}{Theorem}
 \newtheorem{cor}{Corollary}
@@ -68,6 +58,8 @@ samplers. Mass matrices are usually adapted during tuning, and convergence
 speed to a good mass matrix has a big impact on the total cost of posterior
 sampling as well.
 
+todo add references to important hmc/nuts papers.
+
 In the case of normal posterior $N(\mu, \Sigma)$ we can use the condition
 number of $\Sigma$ as an estimate of how difficult it is to sample from
 this posterior with an identity mass matrix.
@@ -77,15 +69,8 @@ this posterior with an identity mass matrix.
 \]
 
 If we use a mass matrix $\hat{\Sigma}^{-1}$, we can compute the
-condition number seen by the sampler as
-
-\[
-\kappa(\Sigma, \hat{\Sigma})
-  = \frac{\max{\eigvals(\Sigma, \hat\Sigma)}}{\min{\eigvals(\Sigma, \hat\Sigma)}},
-\]
-
-where $\eigvals(\Sigma, \hat\Sigma)$ refers to the generalized eigenvalues of
-$\Sigma$ with respect to $\hat\Sigma$.
+condition number by replacing the eigenvalues by the generalized eigenvalues
+with respect to the inverse mass matrix $\eigvals(\Sigma, \hat\Sigma)$.
 
 A better estimate can be found
 here\footnote{\url{https://arxiv.org/pdf/1905.09813.pdf}}, but for our purposes
@@ -107,9 +92,9 @@ gives us an estimate for $\Sigma^{-1}$, while the variance of the draws
 themselves gives an estimate for $\Sigma$. If we have few draws compared to the
 dimensionality of the problem, the empirical covariances therefore contain
 information about the large and small eigenvalues of the true covariance of the
-posterior respectably. But since both of those are important for a good mass
-matrix, it stands to reason that we can use the gradient information to improve
-mass matrix estimates.
+posterior respectively. But since both of those are important for a good mass
+matrix, as can be seen from the condition number, it stands to reason that we
+can use the gradient information to improve mass matrix estimates.
 
 Estimates of the variance with only the draws are also limited by the
 Cramér-Rao bound, which is no longer the case if we consider additional
@@ -120,25 +105,25 @@ higher dimensional case.
 
 \subsection{Fisher Divergence}
 
-Choosing a mass matrix is equivalent to fitting a normal distribution to the
+Choosing a mass matrix is equivalent to fitting a Gaussian distribution to the
 posterior, where the inverse covariance matrix of the fitted distribution is
 the mass matrix.
 
 A natural way to incorporate the gradient information into this covariance
-estimation is by minimizing the fisher divergence (see e.g.
+estimation is by minimizing the Fisher divergence (see e.g.
 \url{https://arxiv.org/pdf/1905.05284.pdf}) between our estimated normal
-distribution with density $q$ the actual posterior distribution with density
-$p$:
+distribution with density $q$ and the actual posterior distribution with
+density $p$:
 
 \[
   F(p, q)
     = \int \lVert \nabla \log p(\theta)
-      - \nabla \log q(\theta)\rVert^2 p(\theta)d\theta
+      - \nabla \log q(\theta)\rVert^2 p(\theta)d\theta.
 \]
 
 It is not immediately obvious which norm we should use here. A natural choice
 becomes apparent if we remember that the mass matrix as used in HMC itself
-defines a norm on the tangent parameter space. We propose to use this norm,
+defines a norm on the tangent parameter space. I propose to use this norm,
 which means that we are looking for a distribution with density $q$ who's
 gradients are close to the gradients of the target distribution $p$ \emph{as
 seen by the sampler}:
@@ -146,24 +131,31 @@ seen by the sampler}:
 $$
   F(p, q)
     = \int \lVert \nabla \log p(\theta)
-      - \nabla \log q(\theta)\rVert_{\hat\Sigma}^2 p(\theta)d\theta
+      - \nabla \log q(\theta)\rVert_{\hat\Sigma}^2 p(\theta)d\theta,
 $$
 
-Where the norm on the tangent space is given by $\lVert x\lVert_{\hat\Sigma}^2
+where the norm on the tangent space is given by $\lVert x\lVert_{\hat\Sigma}^2
 = x^T \hat\Sigma x$, where $\hat\Sigma$ is the covariance of our fitted
 distribution $q$.
 
 This is equivalent to finding an affine transformation $\phi(x) = Ax + \mu$
 such that
 
-\[
+\begin{align}
 F(\phi)
-  = \int \lVert \nabla \log p_\phi(\theta)
-    - \nabla \log N(x \mid 0, 1) \rVert^2 p(\theta) d\theta
-\]
+  &= \int \lVert \nabla \log p_\phi(\theta)
+	- \nabla \log N(\phi(\theta) \mid 0, 1) \rVert^2 p(\theta) d\theta \\
+	&= \int \lVert \nabla \log p_\phi(\theta) + \phi(\theta) \rVert^2 p(\theta) d\theta
+	%&= \int \lVert \phi^*(\nabla \log p(\theta)) + \frac{1}{2} \nabla \log \jacdet(\phi(\theta)) + \phi(\theta) \rVert^2 p(\theta)d\theta
+\end{align}
 is minimal, where $p_\phi(\theta) = \lvert J_\phi\rvert^{1/2} p(\phi(\theta))$
 is the transformed density and $AA^T = \hat\Sigma$ corresponds to the
-covariance of our fitted Gaussian distribution, or the inverse mass matrix.
+covariance of our fitted Gaussian distribution, or the inverse mass matrix
+and $\phi^*$ is the pullback of $\phi$.
+
+\begin{proof}
+TODO
+\end{proof}
 
 This definition is now valid for arbitrary families of diffeomorphisms $\phi$.
 
@@ -172,15 +164,15 @@ p(\theta_i)$, so we approximate $F$ by its Monte Carlo estimate:
 
 \[
 \hat{F}(p, q)
-  = \frac{1}{N} \sum_i \lVert \nabla p(\theta_i)
-    - \nabla q(\theta_i)\rVert^2_\Sigma
+  = \frac{1}{N} \sum_i \lVert \nabla \log p(\theta_i)
+    - \nabla \log q(\theta_i)\rVert^2_\Sigma
 \]
 
 or
 \[
 \hat{F}(\phi)
   = \frac{1}{N} \sum_i
-    \norm{\nabla \log p_\phi(\theta_i) - \nabla \log N(\theta_i \mid 0, 1)}
+    \norm{\nabla \log p_\phi(\theta_i) + \phi(\theta_i)}^2
 \]
 
 \subsection{Properties of minimization problem}
@@ -266,14 +258,48 @@ transformations using neural networks.
 
 \section{Diagonal mass matrix}
 
-Build mass matrix based on the corrected standard deviations
+Based on the previous results we can estimate diagonal mass matrices as
 
 \[
-\sigma = \left[\frac{\Var{X_i}}{\Var{\nabla \log(p(X_i)}}\right]^{1/4}.
+\hat\Sigma^{-1} = \diag\left(\sqrt{\tfrac{\Var{X_i}}{\Var{\nabla \log(p(X_i)}}}\right).
 \]
 
+We have seen that if the posterior is Gaussian with diagonal covariance,
+this will recover the exact covariance matrix with only two draws.
+
+Posterior distributions often approximate diagonal covariances, but
+have some non-diagonal components. To evaluate the new proposed diagonal
+mass matrix approximation for non-diagonal Gaussian distributions 
+we model posterior covariance matrices as coming from a distribution
+defined as follows (todo add ref for Haar distribution, uniform on orthogonal matrices):
+
+\begin{align*}
+U &\sim \text{Haar}(n) \\
+\log(\lambda) &\sim N(0, \sigma_\text{vals}^2) \\
+\log(d) &\sim N(0, \sigma_{diag}^2) \\
+\Sigma &= \diag(d)U\diag(\lambda)U^T\diag(d)
+\end{align*}
+
+We have two hyperparameters, $\sigma_\text{vals}$ and $\sigma_{diag}$. The
+first controls how much correlation structure we have (if $\sigma_\text{vals} =
+0$ the correlation matrix is diagonal), the second how much the marginal
+variables are scaled differently. If we sample from this distribution of
+covariance matrices we can apply both mass matrix adaptation methods and
+compare their respective quality using the condition number from (todo add
+ref). \autoref{fig_diag_condition} shows the results of this comparison, and we
+can see that the Fisher divergence based adaptation is clearly superior if we
+have few draws or if the matrix is dominated by the diagonal scaling. I have
+not found any covariance matrices so far where the fisher divergence based
+estimate was worse (I guess that doesn't exist, but I don't have a proof).
+
+\begin{figure}
+\includegraphics{figures/diag_condition_number}
+\caption {Comparison of fisher divergence based diagonal mass matrix adaptation with variance based}
+\label{fig_diag_condition}
+\end{figure}
+
+todo:
 \begin{itemize}
-\item Show better condition number (from paper) of this mass matrix estimate
 \item Show faster convergence during early tuning
 \item Show ess/grad in a few real models
 \item Overall better performance of nutpie compared to stan/PyMC sampler
