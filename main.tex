@@ -267,11 +267,13 @@ Based on the previous results we can estimate diagonal mass matrices as
 We have seen that if the posterior is Gaussian with diagonal covariance,
 this will recover the exact covariance matrix with only two draws.
 
-Posterior distributions often approximate diagonal covariances, but
-have some non-diagonal components. To evaluate the new proposed diagonal
-mass matrix approximation for non-diagonal Gaussian distributions 
-we model posterior covariance matrices as coming from a distribution
-defined as follows (todo add ref for Haar distribution, uniform on orthogonal matrices):
+\subsection{Gaussian posteriors}
+
+Posterior distributions often approximate diagonal covariances, but have some
+non-diagonal components. To evaluate the new proposed diagonal mass matrix
+approximation for non-diagonal Gaussian distributions we model posterior
+covariance matrices as coming from a distribution defined as follows (todo add
+ref for Haar distribution, uniform on orthogonal matrices):
 
 \begin{align*}
 U &\sim \text{Haar}(n) \\
@@ -298,13 +300,72 @@ estimate was worse (I guess that doesn't exist, but I don't have a proof).
 \label{fig_diag_condition}
 \end{figure}
 
-todo:
+
+\begin{figure}
+\includegraphics{figures/ess_per_grad}
+\caption{
+    Effective sample size for different tuning length and the fisher divergence
+    based diagonal mass matrix adaptation in nutpie and the sample based
+    mass matrix adaptation in Stan.
+}
+\label{fig_diag_condition}
+\end{figure}
+
+
+\subsection{Windowed algorithm implemented in nutpie}
+
+I implemented a new mass matrix adaptation algorithm based on this new
+diagonal mass matrix adaptation in \autoref{nutpie}.
+
+In order to sample the posterior using HMC we have to solve a chicken-and-egg
+problem: We need good samples from the posterior distribution in order to
+figure out the mass matrix, but we need a good mass matrix estimate in order to
+draw good samples. Most MCMC implementations solve this by using a warmup
+phase: We start with some mass matrix estimate, use it to sample for a bit, use
+those draws to improve the mass matrix and repeat. Especially at the beginning
+of this phase, hmc is often quite inefficient. Stan for instance tends to start
+with a number of draws with very high treesize, before it is able to find a
+reasonable mass matrix. During this first phase it often uses a sizable portion
+of the number of gradient evaluations it needs for warmup.
+
+Nutpie changes this warmup method a bit: First, we can use the gradient at the
+initial position to initialize the mass matrix (i.e. $M =
+\diag{\abs{\text{grad}}}$), instead of initializing it using ones.
+
+We then split the warmup period into three sections: The early, middle and late
+phase. In the early phase we keep track of the variance in growing overlapping
+windows, the foreground and background windows. For each new draw we update
+variance estimators for draw and gradient variances with the new point, and
+update the mass matrix estimate using the foreground estimates. If the
+background estimators have seen a certain number of points, we use them as the
+new foreground estimators, and initialize new, empty background estimators. We
+continue this scheme in the middle phase, but with a larger cutoff for window
+switching. In the late phase we fix the mass matrix and only update the step
+size.
+
+\subsection{Evaluation on real posterior distributions}
+
+\autoref{posteriordb} contains a large selection of real world posterior
+distributions. I ran both the Stan sampler and the nutpie sampler on each
+of those posterior distributions with different number of warmup draws.
+We can then measure different metrics:
+
 \begin{itemize}
-\item Show faster convergence during early tuning
-\item Show ess/grad in a few real models
-\item Overall better performance of nutpie compared to stan/PyMC sampler
-implementations
+\item How many gradient evaluations did the sampler use during warmup? Note
+that this is not the same as the number of warmup draws, because for each
+draw we might use a different number of gradient evaluations, and depending
+on current mass matrix estimate and step size those numbers might differ a lot
+between sampler implementations.
+
+\item What is the effective sample size after sampling a fixed number of draws
+after warmup.
+
+\item How many gradient evaluations were used after warmup?
+
+\item General convergence statistics like presence of divergences and $\hat{R}$.
 \end{itemize}
+
+
 
 \section{Mass matrix with correlation structure}
 
