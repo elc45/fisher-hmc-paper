@@ -77,9 +77,9 @@ where we use the usual change-of-variable formula.
 
 We define $F^{\hat{*}}s_x$ for a fisher score $s_x$ as the fisher score of the transformed distribution on $Y$, so
 $$
-\begin{align}
+\begin{aligned}
 F^{\hat{*}}s_x &= \frac{\partial}{\partial y} \log d(F^*\mu)(y)\mid_{y = F^{-1}(x)}
-\end{align}
+\end{aligned}
 $$
 
 We can simplify this a bit by defining $\hat{F}\colon Y\to X\times \mathbb{R}$,
@@ -87,9 +87,9 @@ where $\hat{F}(y) = (F(y), \text{log det} \frac{\partial F}{\partial y})$. Given
 a fisher score $s_x$ on the space $X$, we can show that
 
 $$
-\begin{align}
+\begin{aligned}
 F^{\hat{*}}s_x = \hat{F}^*(s_x, 1)
-\end{align}
+\end{aligned}
 $$
 
 This allows us to implement the fisher score pullback using autodiff systems,
@@ -150,27 +150,30 @@ well-defined norm on the fisher scores that we can use to evaluate their
 difference. So we define
 
 $$
-\begin{align}
-D[F] &= \int \lVert \frac{\partial}{\partial y} \log d(F^*\mu)(y) - \frac{\partial}{\partial y} \log N(y\mid 0, 1) \rVert^2 d(F^*\mu)(y) \\
+\begin{aligned}
+D[F] &= \int \lVert \frac{\partial}{\partial y} \log d(F^*\mu)(y) -
+\frac{\partial}{\partial y} \log N(y\mid 0, 1) \rVert^2 d(F^*\mu)(y) \\
 &= \int \lVert \frac{\partial}{\partial y} \log d(F^*\mu)(y) + y \rVert^2 d(F^*\mu)(y) \\
-&= \int \lVert F^{\hat{*}} \frac{\partial}{\partial x} \log (d\mu(x)) + y\rVert^2d(F^*\mu)(y)
-\end{align}
+&= \int \lVert F^{\hat{*}} \frac{\partial}{\partial x} \log (d\mu(x)) +
+y\rVert^2d(F^*\mu)(y)
+\end{aligned}
 $$
 
 Given posterior draws $x_i$ and corresponding fisher scores $s_i$ we can
 approximate this expectation as
 
 $$
-\begin{align}% \label{eq:finite-fisher-div}
+\begin{aligned}% \label{eq:finite-fisher-div}
 \hat{D}_F = \frac{1}{N} \sum_i \lVert F^{\hat{*}}s_i + F^{-1}(x_i) \rVert^2
-\end{align}
+\end{aligned}
 $$
 
 Or in code:
 
 ```python
 def log_loss(F_pullback_fisher_scores, draws, fisher_scores, logp_vals):
-    draws_y, fisher_scores_y, _ = vectorize(F_pullback_fisher_scores)(draws, fisher_scores, logp_vals)
+    pullback = vectorize(F_pullback_fisher_scores)
+    draws_y, fisher_scores_y, _ = pullback(draws, fisher_scores, logp_vals)
     return log((draws_y + fisher_scores).sum(0).mean())
 ```
 
@@ -184,7 +187,8 @@ function defined above.
 
 ## Specific choices for the diffeomorphism $F$
 
-Depending on the restrictions we choose for our diffeomorphism $F$, we can get more specific results.
+Depending on the restrictions we choose for our diffeomorphism $F$, we can get
+more specific results.
 
 ### Diagonal mass matrix
 
