@@ -1,5 +1,7 @@
 #import "@preview/arkheion:0.1.0": arkheion, arkheion-appendices
 
+#show: set text(size: 12pt)
+
 #show: arkheion.with(
   title: [
     If Only My Posterior Were Normal:\
@@ -10,48 +12,53 @@
       name: "Adrian Seyboldt",
       email: "adrian.seyboldt@gmail.com",
       orcid: "0000-0002-4239-4541",
-      affiliation: "pymc-labs",
+      affiliation: "PyMC-Labs",
     ),
   ),
   abstract: [
-    Foo bar some abstract
+    TODO mostly chatpgt for now...
+
+    Hamiltonian Monte Carlo (HMC) has become a crucial tool in Bayesian inference,
+    offering efficient exploration of complex, high-dimensional parameter spaces.
+    However, HMC’s performance is highly sensitive to the geometry of the
+    posterior distribution, which is often poorly approximated by traditional mass
+    matrix adaptations, especially in cases of non-normal or correlated
+    posteriors. In this paper, we propose an adaptive framework for HMC that uses
+    Fisher divergence to guide transformations of the parameter space,
+    generalizing the concept of a mass matrix to arbitrary diffeomorphisms. By
+    aligning Fisher scores of the transformed posterior with those of a standard
+    normal distribution, our method identifies optimal transformations that adapt
+    to the posterior’s scale, shape, and orientation. We develop theoretical
+    foundations for these adaptive transformations, provide efficient
+    implementation strategies, and demonstrate significant sampling improvements
+    over conventional methods. Additionally, we introduce and evaluate nutpie, an
+    implementation of our method in PyMC, comparing it with existing samplers
+    across a suite of models. Our results show that nutpie delivers enhanced
+    sampling efficiency, particularly for challenging posteriors, positioning it
+    as a powerful tool for Bayesian computation.
   ],
-  keywords: ("First keyword", "Second keyword", "etc."),
+  keywords: (
+    "Bayesian Inference",
+    "Hamiltonian Monte Carlo",
+    "Mass Matrix Adaptation",
+    "Normalizing Flows",
+    "Fisher Divergence",
+  ),
   date: "1. November 2024",
 )
+
 #set cite(style: "chicago-author-date")
 #show link: underline
 
-#show math.equation: set text(weight: 400)
+#show math.equation: set text(weight: 500)
 #show math.equation: set block(spacing: 0.65em)
 
-/*
-#show: set text(
-//font: "STIX Two Text",
-//font: "EB Garamond 08",
-font: "EB Garamond 08",
-size: 12pt
-)
-//#show math.equation: set text(font: "STIX Two Math")
-#show math.equation: set text(font: "Garamond-Math")
-#show raw: set text(font: "Fira Code")
-//#show raw: set text(font: "Source Code Pro")
-*/
+#show raw: set text(font: "Fira Code", size: 9pt)
 
-/*
-#show: set text(
-  font: "Libertinus Serif",
+#show math.equation: set text(
+  font: "New Computer Modern Math",
   size: 11pt,
 )
-#show math.equation: set text(font: "Libertinus Math")
-*/
-#show raw: set text(font: "Fira Code")
-
-#show: set text(
-  font: "EB Garamond 12",
-  size: 11pt,
-)
-#show math.equation: set text(font: "New Computer Modern Math")
 
 #let var(x) = $op("Var", limits: #false)[#x]$
 #let cov(x) = $op("Cov", limits: #false)[#x]$
@@ -222,6 +229,36 @@ def F_pullback_fisher_score(x, s_x, logp):
     return y, s_y, logp - logdet
 ```
 
+== Intrinsic metric tensor on distributions
+
+The fisher metric defines an intrinsic metric on parameter spaces of
+distribuitions. This is a setting that often appears in frequentist statistic,
+where no distribution is defined on the parameter space directly, but only on
+the dataset, though the likelihood.
+
+When we sample Bayesian models, we would like to have a similarly intrinsic
+metric, but not with respect to the likelihood, but with respect to the
+posterior distribution.
+
+To construct such a metric, we start with a standard normal distribution. Here,
+I think we can argue that we already know what the metric should be: Since the
+normal distribution is defined by $d mu(x) prop exp(-<x, x> / 2)$, and as such
+directly in terms of a metric, we can see this metric as the intrinic metric of
+the normal distribution.
+
+We would now like to transfer this metric to other distributions though diffeomorphisms.
+
+Given an absolute continuous distribution on $X = bb(R)^n$ with sufficiently
+smooth density, there is a (not necessarily unique) diffeomorphism $F: Y arrow
+X$, where $Y$ is $bb(R)^n$ with the standard inner product, such that $D[F] =
+integral norm(y + F^* s(F^(-1)(y)))^2 d F^* mu(y) = 0$. Even though the
+diffeomorphism is not unique, the induced inner product on $X$ is unique.
+
+Assume $F_1$ and $F_2$ are such that $D[F_1] = D[F_2] = 0$. Then the pullback
+inner products to $X$ are identical. proof...
+
+This defines an intrinsic metric on $X$.
+
 == Transformed HMC
 <transformed-hmc>
 Given a posterior $mu$ on $X$ and a diffeomorphism $F : Y arrow.r X$, we
@@ -306,22 +343,19 @@ mu$, we get the same effect as diagonal mass matrix estimation.
 
 In this case, the fisher divergence reduces to
 
-todo, check!
-
 $
-  D_(sigma , mu) = 1 / N sum_i norm(sigma dot.circle alpha_i + sigma - (x_i - mu) dot.circle sigma^(-1))^2
+  hat(D)_(sigma , mu) = 1 / N sum_i norm(sigma dot.circle alpha_i
+  + sigma^(-1) dot.circle (x_i - mu))^2
 $
 
-It is not hard to see that this is minimal if $sigma^2 = var(x_i)^(1/2)
+This is a special case of the affine transformation in
+#ref(<appendix-proof-affine>) and minimal if $sigma^2 = var(x_i)^(1/2)
 var(alpha_i)^(-1/2)$ and $mu = dash(x)_i + sigma^2 dash(s)_i$. So we recover the
-same result we got in #ref(<motivation-gaussian>). From those results we also
-know that this recovers the exact posterior covariance with any two points in
-the posterior space.
-
-It has the advantage that is it very easy to compute \(also using an online
-algorithm for the variance to avoid having to store the $x_i$ and $alpha_i$
-values). It is therefore the default in nutpie, and in a later section we will
-show some benchmarks to compare its performance.
+same result we got in #ref(<motivation-gaussian>). It is very easy to compute
+(also using an online algorithm for the variance to avoid having to store the
+$x_i$ and $alpha_i$ values), and therefore the default in nutpie. In a
+#ref(<numerical-results>) we will show some benchmarks to compare its
+performance.
 
 ==== Some theoretical results for normal posteriors
 <some-theoretical-results-for-normal-posteriors>
@@ -338,7 +372,7 @@ matrix, we effectively minimize $sum_i lambda_i$, and only penalize large
 eigenvalues. If we choose $diag(bb(E) (alpha alpha^T))$ we effectively minimize
 $sum lambda_i^(- 1)$ and only penalize small eigenvalues. But based on some
 theoretical work for multivariate normal distributions, we know that both large
-and small eigenvalues make HMC less efficient. \(todo ref)
+and small eigenvalues make HMC less efficient. (todo ref)
 
 We can use the result in (todo ref) to evaluate the different diagonal mass
 matrix choices on various gaussian posteriors, with different numbers of
@@ -351,12 +385,13 @@ We choose $F_(A , mu) (y) = A y + mu$. This corresponds to a mass matrix $M = (A
 A^T)^(- 1)$. Because as we will see $hat(D)_F$ only depends on $A A^T$ and $mu$,
 we can restrict $A$ to be symmetric positive definite.
 
-We get $ D [F] = dots $
+We get $ hat(D) [F] = 1/N sum norm(A^T s_i + A^(-1) (x_i - mu))^2 $
 
-which is minimal if $A A^T cov(x_i) A A^T = cov(alpha_i)$, and as such
-corresponds again to our earlier derivation in
-#ref(<motivation-gaussian>). If the two covariance matrices are full rank, we
-get a unique minimum at the geometric mean of $cov(x_i)$ and $cov(s_i)$.
+which is minimal if $A A^T cov(x_i) A A^T = cov(alpha_i)$ (for a proof, see
+#ref(<appendix-proof-affine>)), and as such corresponds again to our earlier
+derivation in #ref(<motivation-gaussian>). If the two covariance matrices are
+full rank, we get a unique minimum at the geometric mean of $cov(x_i)$ and
+$cov(s_i)$.
 
 If the number of dimensions is larger than the number of draws, we can add
 regularization terms. And to avoid $O (n^3)$ computation costs, we can project
@@ -557,13 +592,16 @@ We run nutpie and cmdstan on posteriordb to compare performance in terms of
 effective sample size per gradient evaluation and in terms of effective sample
 size per time. todo
 
-
 = Appendix
 
-$D[F]$ for $F(y) = A y + mu$ is minimal if $Sigma cov(alpha) Sigma = cov(x)$ and $mu = dash(x) + Sigma dash(alpha)$, where $Sigma = A A^T$:
+== Minimize Fisher divergence for affine transformations
+<appendix-proof-affine>
 
-We collect all $alpha_i$ in the columns of $G$, and all $x_i$ in the columns of $X$.
-Let $e$ we the vector containing only ones. And let $Sigma = A A^T$.
+$D[F]$ for $F(y) = A y + mu$ is minimal if $Sigma cov(alpha) Sigma = cov(x)$ and
+$mu = dash(x) + Sigma dash(alpha)$, where $Sigma = A A^T$:
+
+We collect all $alpha_i$ in the columns of $G$, and all $x_i$ in the columns of
+$X$. Let $e$ we the vector containing only ones. And let $Sigma = A A^T$.
 
 $
   D = 1 / N norm(A^T G + A^(-1) (X - mu e^T))_F^2 \
@@ -608,17 +646,20 @@ $
 
 This is zero for all $d A$ iff
 $
-  0 = (A^T G + A^(-1) (tilde(X) - Sigma dash(alpha) e^T)) G^T 
+  0 = (A^T G + A^(-1) (tilde(X) - Sigma dash(alpha) e^T)) G^T
   + A^(-1) (Sigma dash(alpha) e^T - tilde(X))(A^T G + A^(-1) (tilde(X) - Sigma dash(alpha) e^T))^T A^(-1) \
   = A^T tilde(G) G^T + A^(-1) tilde(X) G^T + (A^T dash(alpha) e^T - A^(-1) tilde(X))(tilde(G)^T + tilde(X)^T Sigma^(-1)),
 $
 
-where $tilde(X) = X - dash(x) e^T$, the matrix with centered $x_i$ in the columns, and $tilde(G) = G - dash(alpha) e^T$. Because $e^T tilde(X)^T = e^T tilde(G)^T = 0$ we get
+where $tilde(X) = X - dash(x) e^T$, the matrix with centered $x_i$ in the
+columns, and $tilde(G) = G - dash(alpha) e^T$. Because $e^T tilde(X)^T = e^T
+tilde(G)^T = 0$ we get
 $
-  A^T tilde(G) G^T + A^(-1) tilde(X) G^T - A^(-1) tilde(X) tilde(G)^T - A^(-1) tilde(X) tilde(X)^T Sigma^(-1) = 0
+  A^T tilde(G) G^T + A^(-1) tilde(X) G^T - A^(-1) tilde(X) tilde(G)^T - A^(-1)
+  tilde(X) tilde(X)^T Sigma^(-1) = 0
 $
 
-Or 
+Or
 $
   (tilde(G) + Sigma^(-1)tilde(X)) G^T - Sigma^(-1) tilde(X) tilde(G)^T - Sigma^(-1) tilde(X) tilde(X)^T Sigma^(-1) \
   = tilde(G) G^T + Sigma^(-1) tilde(X) e dash(alpha)^T - Sigma^(-1) tilde(X) tilde(X)^T Sigma^(-1) \
