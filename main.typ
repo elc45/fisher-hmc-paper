@@ -203,7 +203,7 @@ $
   &= hat(F)^*d(mu/lambda_N, 1)
 $
 
-where
+todo explain $hat(F)$...
 
 where $log(lambda_N / ((F^(-1))^* lambda_M))$ is the log-determinant term in
 the change-of-variable formula.
@@ -275,6 +275,8 @@ $
   & = integral norm(diff / (diff y) log (hat(F)^* mu) (y) + y)^2 d F^* mu(y)\
   & = integral norm(F^hat(*) diff / (diff x) log (d mu (x)) + y)^2 d (F^* mu) (y)
 $
+
+todo fix notation...
 
 This is a special case of the fisher divergence between the transformed
 posterior and a standard normal distribution.
@@ -366,13 +368,19 @@ derivation in #ref(<motivation-gaussian>). If the two covariance matrices are
 full rank, we get a unique minimum at the geometric mean of $cov(x_i)$ and
 $cov(s_i)$.
 
+=== Diagonal plus low-rank
+
 If the number of dimensions is larger than the number of draws, we can add
 regularization terms. And to avoid $O (n^3)$ computation costs, we can project
 draws and fisher scores into the span of $x_i$ and $alpha_i$, compute the
 regularized mean in this subspace and use the mass matrix $dots.h$. If we only
 store the components, we can avoid $O (n^2)$ storage, and still do all
 operations we need for HMC quickly. To further reduce computational cost, we can
-ignore eigenvalues that are close to one. todo expand paragraph
+ignore eigenvalues that are close to one.
+
+todo
+
+Implemented in nutpie with `nutpie.sample(model, low_rank_modified_mass_matrix=True)`
 
 === Model specific diffeomorphisms
 <model-specific-diffeomorphisms>
@@ -402,10 +410,11 @@ This suggests $F_t(sigma, z) = (sigma, sigma^(1 - t)z)$…
 === Normalizing flows
 <normalizing-flows>
 
-Define $F_eta$ as a normalizing flow with parameters $eta$. Use adam or
-similar to minimize $D [F]$.
+Define $F_eta$ as a normalizing flow with parameters $eta$. Use adam to minimize $D [F]$.
 
 todo
+
+Current code: #link("https://github.com/pymc-devs/nutpie/pull/154")
 
 = Adaptation schema to learn the diffeomorphism
 <adaptation-tuning-warmup-of-mass-matrix>
@@ -563,7 +572,11 @@ todo
 
 We run nutpie and cmdstan on posteriordb to compare performance in terms of
 effective sample size per gradient evaluation and in terms of effective sample
-size per time. todo
+size per time...
+
+Code is here:
+
+todo
 
 = Appendix
 
