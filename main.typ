@@ -16,26 +16,24 @@
     ),
   ),
   abstract: [
-    TODO mostly chatpgt for now...
-
-    Hamiltonian Monte Carlo (HMC) has become a crucial tool in Bayesian inference,
-    offering efficient exploration of complex, high-dimensional parameter spaces.
-    However, HMC’s performance is highly sensitive to the geometry of the
-    posterior distribution, which is often poorly approximated by traditional mass
-    matrix adaptations, especially in cases of non-normal or correlated
-    posteriors. In this paper, we propose an adaptive framework for HMC that uses
-    Fisher divergence to guide transformations of the parameter space,
-    generalizing the concept of a mass matrix to arbitrary diffeomorphisms. By
-    aligning Fisher scores of the transformed posterior with those of a standard
-    normal distribution, our method identifies optimal transformations that adapt
-    to the posterior’s scale, shape, and orientation. We develop theoretical
-    foundations for these adaptive transformations, provide efficient
-    implementation strategies, and demonstrate significant sampling improvements
-    over conventional methods. Additionally, we introduce and evaluate nutpie, an
-    implementation of our method in PyMC, comparing it with existing samplers
-    across a suite of models. Our results show that nutpie delivers enhanced
-    sampling efficiency, particularly for challenging posteriors, positioning it
-    as a powerful tool for Bayesian computation.
+    Hamiltonian Monte Carlo (HMC) has become a crucial tool in Bayesian
+    inference, offering efficient exploration of complex, high-dimensional
+    parameter spaces. However, HMC’s performance is highly sensitive to the
+    geometry of the posterior distribution, which is often poorly approximated
+    by traditional mass matrix adaptations, especially in cases of non-normal or
+    correlated posteriors. In this paper, we propose an adaptive framework for
+    HMC that uses Fisher divergence to guide transformations of the parameter
+    space, generalizing the concept of a mass matrix to arbitrary
+    diffeomorphisms. By aligning the score function of the transformed posterior
+    with those of a standard normal distribution, our method identifies
+    transformations that adapt to the posterior’s scale and shape. We develop
+    theoretical foundations for these adaptive transformations, provide
+    efficient implementation strategies, and demonstrate significant sampling
+    improvements over conventional methods. Additionally, we introduce and
+    evaluate nutpie, an implementation of our method for PyMC and Stan models
+    and compare it with existing samplers across a suite of models. Our results
+    show that nutpie delivers better sampling efficiency, particularly for
+    challenging posteriors.
   ],
   keywords: (
     "Bayesian Inference",
@@ -63,11 +61,11 @@
 #let var(x) = $op("Var", limits: #false)[#x]$
 #let cov(x) = $op("Cov", limits: #false)[#x]$
 #let diag(x) = $op("diag", limits: #false)(#x)$
+#let dist(x, y) = $op("dist", limits: #false)(#x, #y)$
+#let inner(x, y) = $lr(angle.l #x, #y angle.r)$
 
 = Introduction
 <introduction>
-
-TODO (part is from ChatGPT, remove some of the fluff)
 
 Hamiltonian Monte Carlo (HMC) is a powerful Markov Chain Monte Carlo (MCMC)
 method widely used in Bayesian inference for exploring complex posterior
@@ -76,7 +74,7 @@ efficiently than traditional MCMC techniques, making it popular in probabilistic
 programming libraries like Stan and PyMC. However, the performance of HMC
 depends critically on the parameterization of the posterior space, often framed
 in terms of a “mass matrix” that defines an inner product on this space.
-Properly tuning this parameterization is crucial for efficient sampling, yet
+Properly tuning this parameterization is crucial for efficient sampling, but
 achieving optimal performance remains a challenging task, particularly for
 posterior distributions with complex geometries, such as those that exhibit
 strong correlations or funnel-like structures.
@@ -95,60 +93,18 @@ hierarchical models and large-scale datasets.
 To address these limitations, we propose an adaptive HMC framework that extends
 beyond the traditional concept of a mass matrix, using arbitrary diffeomorphisms
 to dynamically transform the parameter space. In this work, we utilize the
-Fisher divergence as a guiding criterion for these transformations, allowing us
+Fisher divergence as a guiding criterion for these transformations, which allows us
 to adapt the geometry of the posterior space in a way that optimizes HMC’s
-efficiency. By aligning the Fisher scores (derivatives of the log-density) of
+efficiency. By aligning the scores (derivatives of the log-density) of
 the transformed posterior with those of a standard normal distribution, we
 approximate an idealized parameterization that promotes efficient exploration.
 
 Our approach is grounded in the observation that the Fisher divergence provides
-a meaningful metric for quantifying the discrepancy between the transformed
+a meaningful metric to quantifying the discrepancy between the transformed
 posterior and a normal distribution. By minimizing this divergence, we can
-identify transformations that reduce the complexity of the posterior geometry,
-facilitating more effective trajectories and improved convergence. This adaptive
-framework generalizes the mass matrix concept, enabling transformations that
-adapt not only to scale but also to shape, orientation, and other geometric
-characteristics of the posterior.
-
-In this paper, we develop and analyze the application of Fisher divergence to
-HMC adaptation, presenting both theoretical insights and practical
-implementation strategies. Through numerical experiments, we demonstrate that
-our method can significantly improve sampling efficiency compared to traditional
-approaches, particularly in cases where the posterior deviates substantially
-from normality. This adaptive transformation framework offers a flexible and
-scalable alternative for MCMC sampling, with potential applications across a
-wide range of complex Bayesian models.
-
-This introduction outlines the problem, motivation, proposed approach, and
-contributions in a way that provides a clear roadmap for readers unfamiliar with
-the specific technical concepts. It establishes why the Fisher divergence and
-adaptive transformations are relevant and what readers can expect from the
-paper.
-
-
-The performance of Hamiltonian MCMC samplers like PyMC or Stan depends
-critically on the choice of mass matrix. The mass matrix represents a
-choice of inner product in the parameter space.
-
-(I talk about HMC, but everything applies to variations of this, like
-NUTS or … todo refs)
-
-The most common choice is to use the inverse of the posterior covariance
-as mass matrix. Most commonly, the mass matrix is constrained to be a
-diagonal matrix.
-
-There are previous proposals to use the covariance of the fisher scores
-instead, or to minimize a KL-divergence between a multivariate normal
-distribution and the posterior, and to use the resulting precision
-matrix of that normal distribution.
-
-== Current challenges in HMC
-<current-challenges-in-hmc>
-- Slow warmup phase \(chicken-egg problem). (mention long trajectories
-  in early phase)
-- Bad performance with correlated posteriors. \(related to eigenvalues
-  as shown later. Especially if datasets get large)
-- Bad geometry in posterior (funnels etc)
+identify transformations that reduce the complexity of the posterior geometry.
+This adaptive framework generalizes the mass matrix concept, but also improves
+sampling efficiency if it is employed to find better mass matrices.
 
 = Adaptive Transformations in HMC: Motivation, Theory, and Examples
 
@@ -188,30 +144,74 @@ or we would not have to run MCMC in the first place. It is quite common that
 they approximate normal distributions reasonably well, so this should indicate
 that the fisher scores contain useful information we are currently neglecting.
 
-== Pullbacks of fisher scores
+== Fisher divergence
+
+todo: introduce notation $nu / omega$ for relative density.
+
+todo: Write a second version of this without all the diffgeo...
+
+Let $(Y, g)$ be a Riemannian manifold with probability volume forms $omega_1$ and
+$omega_2$. They define scalar functions $p, q in Omega^0(Y)$ relative to the
+volume form of the metric tensor $omega$ (so $omega_1 = p omega$ and $omega_2 =
+q omega$). We define the fisher divergence of $omega_1$ and $omega_2$ as
+
+$
+  D_g (omega_1, omega_2) = integral norm(d log(p) - d log(q))^2_g d omega_1.
+$
+
+Equivalently we can define $omega_1 = z omega_2$, and set
+
+$
+  D_g (omega_1, omega_2) = integral norm(d log(z))^2_g d omega_1.
+$
+
+Note that $D$ requires more structure on $Y$ than the KL-divergence, as the
+norm depends on the metric tensor.
+
+Given a second (non-Riemannian) manifold $X$ with a probability volume form
+$mu$, and a diffeomorphism $F: Y arrow X$, we can define the divergence between
+$mu$ and $omega_1$ by pulling back $mu$ to $X$, ie $D_g (F^* mu, omega_1)$.
+
+The way we will apply this, is by noticing that the normal distributions are
+defined in terms of a metric tensor (or in $bb(R)^n$ an inner product), because
+we can write the density as $prop exp(-1/2 dist("mean", x)^2)$. So if we compute
+the fisher divergence between a normal distribution and some other distribution, we
+can always use the metric tensor of the normal distribution.
+
+Notice, that if we were to compute the fisher divergence directly on $X$, we would have
+to take into account how the metric tensor changes with the transformation $F$:
+
+$
+  D_g (F^* mu, omega_1) = D_((F^(-1))^*g) (mu, (F^(-1))^* omega_1)
+$
+
+== Transformations of scores
 <pullbacks-of-fisher-scores>
-Let $mu$ be a probability measure on some space $X$ with density $d mu (x)$, and
-$F : Y arrow X$ a diffeomorphism. (Note that we define the diffeomorphism as
-going from the transformed space to the original space $X$, not the other way
-round).
 
-The pullback of $mu$ defines a measure $F^* mu$ on $Y$ with density $d(F^*
-mu)(y) = d mu (F(y)) abs(det diff/(diff y) F(y))$, where we use the usual
-change-of-variable formula.
+In practice, we don't work with the measure $mu$ directly, but with the density
+$mu / lambda$ (like the Radon-Nikodym derivative, also often written as $(d mu)/(d
+lambda)$) with respect to the Lebesgue measure $lambda$, and we will have
+different Lebesgue measures on $X$ and $Y$. So in order to compute $D_g (F^* mu,
+omega)$ we have to understand how to compute the score function $d log((d F^*
+mu)/(d lambda_N))$ on $Y$ if we have the score function $d log((d mu) / (d
+lambda_M))$ on $X$.
 
-We define $F^(hat(*)) alpha_x$ for a fisher score $alpha_x$ as the fisher score
-of the transformed distribution on $Y$, so $ F^(hat(*)) alpha_x & =
-lr(frac(diff, diff y) log d (F^* mu) (y) |)_(y = F^(-1) (x)) $
+$
+  d log((F^* mu)/(lambda_M))
+  &= d log((F^* mu) / (F^* lambda_N) (F^* lambda_N) / lambda_M) \
+  &= F^* d log mu / lambda_N + F^* d log (lambda_N / ((F^(-1))^* lambda_M)) \
+  &= hat(F)^*d(mu/lambda_N, 1)
+$
 
-We can simplify this a bit by defining $hat(F) : Y arrow X times bb(R)$, where
-$hat(F) (y) = (F (y) , log abs(det frac(diff F, diff y)))$. Given a fisher score
-$alpha_x$ on the space $X$, we can show that
+where
 
-$ F^(hat(*)) alpha_x = hat(F)^(*) (alpha_x , 1) $
+where $log(lambda_N / ((F^(-1))^* lambda_M))$ is the log-determinant term in
+the change-of-variable formula.
 
-This allows us to implement the fisher score pullback using autodiff systems,
-for instance in Jax \(although there are more efficient implementations in
-special cases):
+We can simplify this a bit by introducing $hat(F): Y arrow X times bb(R)$
+where $hat(F)(y) = (F(y), log abs(det((partial F)/(partial y))))$
+
+For instance in Jax:
 
 ```python
 def F_and_logdet(y):
@@ -222,57 +222,30 @@ def F_inv(x):
     """Compute the inverse of F."""
     ...
 
-def F_pullback_fisher_score(x, s_x, logp):
+def F_pullback_score(x, s_x, logp):
+    """Compute the transformed position, score and logp."""
     y = F_inv(x)
     (_, logdet), pullback_fn = jax.vjp(F_and_logdet, y)
-    s_y = pullback_fn(s_x)
-    return y, s_y, logp - logdet
+    s_y = pullback_fn(s_x, 1.0)
+    return y, s_y, logp + logdet
 ```
-
-== Intrinsic metric tensor on distributions
-
-The fisher metric defines an intrinsic metric on parameter spaces of
-distribuitions. This is a setting that often appears in frequentist statistic,
-where no distribution is defined on the parameter space directly, but only on
-the dataset, though the likelihood.
-
-When we sample Bayesian models, we would like to have a similarly intrinsic
-metric, but not with respect to the likelihood, but with respect to the
-posterior distribution.
-
-To construct such a metric, we start with a standard normal distribution. Here,
-I think we can argue that we already know what the metric should be: Since the
-normal distribution is defined by $d mu(x) prop exp(-<x, x> / 2)$, and as such
-directly in terms of a metric, we can see this metric as the intrinic metric of
-the normal distribution.
-
-We would now like to transfer this metric to other distributions though diffeomorphisms.
-
-Given an absolute continuous distribution on $X = bb(R)^n$ with sufficiently
-smooth density, there is a (not necessarily unique) diffeomorphism $F: Y arrow
-X$, where $Y$ is $bb(R)^n$ with the standard inner product, such that $D[F] =
-integral norm(y + F^* s(F^(-1)(y)))^2 d F^* mu(y) = 0$. Even though the
-diffeomorphism is not unique, the induced inner product on $X$ is unique.
-
-Assume $F_1$ and $F_2$ are such that $D[F_1] = D[F_2] = 0$. Then the pullback
-inner products to $X$ are identical. proof...
-
-This defines an intrinsic metric on $X$.
 
 == Transformed HMC
 <transformed-hmc>
-Given a posterior $mu$ on $X$ and a diffeomorphism $F : Y arrow.r X$, we
+Given a posterior $mu$ on $X$ and a diffeomorphism $F : Y arrow X$, we
 can run HMC on the transformed space $Y$:
 
 ```python
-def hmc_step(rng, x, d_mu, F, step_size, n_leapfrog):
-    logp_x, s_x = gradient_and_value(d_mu)(x)
-    logp_y, s_y = F.inverse.hat(logp, s_x)
+def hmc_proposal(rng, x, mu_density, F, step_size, n_leapfrog):
+    logp_x, s_x = gradient_and_value(mu_density)(x)
+    y, s_y, logp_y = F_pullback_score(x, s_x, logp_x)
 
     velocity = rng.normal(size=len(x))
     for i in range(n_leapfrog):
-        # TODO
+        # TODO just the usual leapfrog with identity mass matrix
         pass
+
+    return
 ```
 
 If $F$ is an affine transformation, this simplifies to the usual mass-matrix
@@ -287,19 +260,19 @@ diffeomorphism to a measure of difficulty for HMC.
 
 This hard to quantify in general, but we can notice that the efficiency of HMC
 largely depends on the trajectory, and this trajectory does not depend on the
-density directly, but only the fisher scores. We also know that HMC is efficient
-if the posterior is a standard normal distribution. So a reasonable loss
-function can ask how different the fisher scores on the transformed space are
-from the fisher scores of a standard normal distribution. If they match well, we
-will use the same trajectory we would use for a standard normal distribution,
-which we know to be a good trajectory. And because the standard normal
-distribution is defined in terms of an inner product, we already have a
-well-defined norm on the fisher scores that we can use to evaluate their
-difference. So we define
+density directly, but only the scores. We also know that HMC is efficient if the
+posterior is a standard normal distribution. So a reasonable loss function can
+ask how different the scores on the transformed space are from the scores of a
+standard normal distribution. If they match well, we will use the same
+trajectory we would use for a standard normal distribution $omega$, which we
+know to be a good trajectory. And because the standard normal distribution is
+defined in terms of an inner product, we already have a well-defined norm on the
+scores that we can use to evaluate their difference. But the fisher divergence
+$D(F^* mu, omega)$ measures exactly this difference. We have
 
 $
-  D [F] & = integral norm( frac(diff, diff y) log d (F^* mu) (y) - diff/(diff y) log N (y| 0, 1) )^2 d (F^* mu) (y)\
-  & = integral norm(diff / (diff y) log d (F^* mu) (y) + y)^2 d (F^* mu) (y)\
+  D(F^*mu, omega) & = integral norm( d log (F^* mu)/lambda_Y - d log omega / lambda_Y )^2_g F^* mu\
+  & = integral norm(diff / (diff y) log (hat(F)^* mu) (y) + y)^2 d F^* mu(y)\
   & = integral norm(F^hat(*) diff / (diff x) log (d mu (x)) + y)^2 d (F^* mu) (y)
 $
 
