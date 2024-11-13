@@ -112,13 +112,13 @@ sampling efficiency if it is employed to find better mass matrices.
 <motivation-gaussian>
 
 When we run HMC, we compute the derivatives of the posterior log density (the
-fisher scores). They contain a lot of information about the posterior, but when
+scores). They contain a lot of information about the posterior, but when
 we compute the mass matrix, we ignore this information.
 
-To illustrate how useful the fisher scores can be, let’s start very simple, and
+To illustrate how useful the scores can be, let’s start very simple, and
 assume our posterior is a one dimensional normal distribution $N (mu , sigma^2)$
 with density $d mu$, and let’s assume we have two posterior draws $x_1$ and
-$x_2$, together with the covector (row-vector) of fisher scores $alpha_i =
+$x_2$, together with the covector (row-vector) of scores $alpha_i =
 frac(diff, diff x_i) log d mu (x_i) = sigma^(-2) (mu - x_i)$. Based on this
 information we can directly compute $mu$ and $sigma$, and so identify the exact
 posterior, by solving for $mu$ and $sigma$. We get $mu = dash(x) + sigma^2
@@ -128,7 +128,7 @@ we can compute the exact posterior and ideal mass matrix with no sample variance
 based on just two points!
 
 This generalizes directly to multivariate normal posteriors $N(mu, Sigma)$.
-Let’s assume we have $N + 1$ linearly independent draws $x_i$, and the fisher
+Let’s assume we have $N + 1$ linearly independent draws $x_i$, and the
 scores $alpha_i = Sigma^(-1) (x_i - mu)$. The mean of these equations gives us
 $mu = dash(x) - Sigma dash(alpha)$. It follows that $S = Sigma^(-1) X$, where
 the i-th column of $S$ is $alpha_i - dash(alpha)$, and the i-th column of $X$ is
@@ -138,11 +138,11 @@ geometric mean of the positive symmetric matrices $cov(x_i)$ and
 $cov(s_i)^(-1)$, so $Sigma = exp (log (cov(x_i)) \/ 2 - log (cov(alpha_i) \/ 2)$
 or some expression with lots of matrix square roots \(todo).
 
-Given the fisher scores, we can compute the parameters of a normal distribution
+Given the scores, we can compute the parameters of a normal distribution
 exactly. Most posterior distributions are not multivariate normal distributions,
 or we would not have to run MCMC in the first place. It is quite common that
 they approximate normal distributions reasonably well, so this should indicate
-that the fisher scores contain useful information we are currently neglecting.
+that the scores contain useful information we are currently neglecting.
 
 == Fisher divergence
 
@@ -186,7 +186,7 @@ $
 $
 
 == Transformations of scores
-<pullbacks-of-fisher-scores>
+<pullbacks-of-scores>
 
 In practice, we don't work with the measure $mu$ directly, but with the density
 $mu / lambda$ (like the Radon-Nikodym derivative, also often written as $(d mu)/(d
@@ -281,7 +281,7 @@ todo fix notation...
 This is a special case of the fisher divergence between the transformed
 posterior and a standard normal distribution.
 
-Given posterior draws $x_i$ and corresponding fisher scores $alpha_i$ in the
+Given posterior draws $x_i$ and corresponding scores $alpha_i$ in the
 original posterior space $X$ we can approximate this expectation as
 
 $ hat(D)_F = 1 / N sum_i norm( F^(hat(*)) s_i + F^(-1) (x_i) )^2 $
@@ -289,11 +289,11 @@ $ hat(D)_F = 1 / N sum_i norm( F^(hat(*)) s_i + F^(-1) (x_i) )^2 $
 Or in code:
 
 ```python
-def log_loss(F_pullback_fisher_scores, draw_data):
-    draws, fisher_scores, logp_vals = draw_data
-    pullback = vectorize(F_pullback_fisher_scores)
-    draws_y, fisher_scores_y, _ = pullback(draws, fisher_scores, logp_vals)
-    return log((draws_y + fisher_scores).sum(0).mean())
+def log_loss(F_pullback_scores, draw_data):
+    draws, scores, logp_vals = draw_data
+    pullback = vectorize(F_pullback_scores)
+    draws_y, scores_y, _ = pullback(draws, scores, logp_vals)
+    return log((draws_y + scores).sum(0).mean())
 ```
 
 Note: Some previous literature (todo ref) proposed to minimize $bb(E) [alpha_x^T
@@ -372,7 +372,7 @@ $cov(s_i)$.
 
 If the number of dimensions is larger than the number of draws, we can add
 regularization terms. And to avoid $O (n^3)$ computation costs, we can project
-draws and fisher scores into the span of $x_i$ and $alpha_i$, compute the
+draws and scores into the span of $x_i$ and $alpha_i$, compute the
 regularized mean in this subspace and use the mass matrix $dots.h$. If we only
 store the components, we can avoid $O (n^2)$ storage, and still do all
 operations we need for HMC quickly. To further reduce computational cost, we can
@@ -478,7 +478,7 @@ sampling time.
 
 ```python
 class MassMatrixEstimator:
-    def update(self, position, fisher_score):
+    def update(self, position, score):
         ...
     def current(self) -> MassMatrix:
         ...
@@ -496,11 +496,11 @@ class StepSizeAdapt:
         ...
 
 def warmup(num_warmup, num_early, num_late, early_switch_freq, late_switch_freq):
-    position, fisher_score = draw_from_prior()
+    position, score = draw_from_prior()
     foreground_window = MassMatrixEstimator()
-    foreground_window.update(position, fisher_score)
+    foreground_window.update(position, score)
     background_window = MassMatrixEstimator()
-    step_size_estimator = StepSizeAdapt(position, fisher_score)
+    step_size_estimator = StepSizeAdapt(position, score)
     first_mass_matrix = True
 
     for draw in range(num_warmup):
@@ -510,16 +510,16 @@ def warmup(num_warmup, num_early, num_late, early_switch_freq, late_switch_freq)
         mass_matrix = foreground_window.current()
         step_size = step_size_estimator.current_warmup()
         (
-          accept_stat, accept_stat_sym, position, fisher_score,
+          accept_stat, accept_stat_sym, position, score,
           diverging, steps_from_init
-        ) = hmc_step(mass_matrix, step_size, position, fisher_score)
+        ) = hmc_step(mass_matrix, step_size, position, score)
 
         # Early on we ignore diverging draws that did not move
         # several steps. They probably just used a terrible step size
         ok = (not is_early) or (not diverging) or (steps_from_init > 4)
         if ok:
-            foreground_window.update(position, fisher_score)
-            background_window.update(position, fisher_score)
+            foreground_window.update(position, score)
+            background_window.update(position, score)
 
         if is_late:
             step_size_estimator.update(accept_stat_sym)
