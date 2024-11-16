@@ -5,7 +5,7 @@
 #show: arkheion.with(
   title: [
     If Only My Posterior Were Normal:\
-    Adaptive HMC with Fisher Divergence
+    Introducing Fisher HMC
   ],
   authors: (
     (
@@ -165,7 +165,7 @@ $
   D_g (omega_1, omega_2) = integral norm(d log(z))^2_g d omega_1.
 $
 
-Note that $D$ requires more structure on $Y$ than the KL-divergence, as the
+Note that $D$ requires more structure on $Y$ than the KL-divergence ($integral log(z) d omega_1$), as the
 norm depends on the metric tensor.
 
 Given a second (non-Riemannian) manifold $X$ with a probability volume form
@@ -200,7 +200,7 @@ $
   d log((F^* mu)/(lambda_M))
   &= d log((F^* mu) / (F^* lambda_N) (F^* lambda_N) / lambda_M) \
   &= F^* d log mu / lambda_N + F^* d log (lambda_N / ((F^(-1))^* lambda_M)) \
-  &= hat(F)^*d(mu/lambda_N, 1)
+  &= hat(F)^*(d log mu/lambda_N, 1)
 $
 
 todo explain $hat(F)$...
@@ -410,9 +410,50 @@ This suggests $F_t(sigma, z) = (sigma, sigma^(1 - t)z)$…
 === Normalizing flows
 <normalizing-flows>
 
-Define $F_eta$ as a normalizing flow with parameters $eta$. Use adam to minimize $D [F]$.
+Normalizing flows provide a large family of diffeomorphisms that we can use to
+transform our posterior. We have rather strong requirements for the flows however:
+We need forward and inverse transformations, and we need to be able to compute the
+log determinant of the jacobian of the transformation efficiently. A well studied
+familiy of normalizing flows that provides all of those is RealMVP (todo ref).
 
-todo
+For our experiments we used the library flowjax that implemnets RealMVP and
+other normalizing flows in jax. I slightly changed the adaptation schema from
+the usual nutpie algorithm (described in more detail in the next section), so
+that for the first couple of windows only diagonal mass matrix adaptation is
+used, and only after 150 draws do we start to fit a normalizing flow.
+
+We then repeatedly run an adam optimizer on a window of draws, and use the updated
+normalizing flow to sample.
+
+Especially for larger models the size of our training data set seems to be very
+important, so I included the full trajectory of the HMC sampler as training
+data, not just the draws themselves. I think this might be usful to do even if
+the amount of training data is not a limiting factor, as we would like that the
+transformed posterior matches the normal distribution everywhere the HMC sampler
+evaluaties it, not just at those points it accepts as draws.
+
+So far I have not tested this systematically, but my experiments suggest that
+this can help us to sample a wide range of posterior distributions a lot more
+efficiently, or also to sample many distributions that were previously not
+possible to sample without extensive manual reparametrizations. It also comes
+with a large computational cost however, as the optimization itself can take a
+long time. Luckily, it seems to run relatiely efficiently on GPUs, so that even
+if the logp function itself does not lend itself to evaluation on GPUs, we can
+still spend most of the comutational time running scalable code. Often, the
+number of gradient evaluations that are necessary to sample even complicated
+posterior distributions decrease a lot.
+
+With the current implementation I did not have too much luck with problems
+however, that have significantly more than around 1000 parameters. I am running
+into memory issues (I think those are probably an implementation issue and not a
+fundamental issue with the algorithm however) and the effectiveness of the
+normalizing flows, or our ability to fit them properly with the limited number
+of evaluation points seems to decrease.
+
+I hope that this issue can be overcome by choosing normalizing flow layers in a
+way that takes model structure into account, or by adding layers one after the
+other, based on which parameters seem to not fit the normal distirbuito well
+yet.
 
 Current code: #link("https://github.com/pymc-devs/nutpie/pull/154")
 

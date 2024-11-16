@@ -61,7 +61,7 @@ sampling as well.
 
 todo add references to important hmc/nuts papers.
 
-In the case of normal posterior $N(\mu, \Sigma)$ we can use the condition
+In the case of a normal posterior $N(\mu, \Sigma)$ we can use the condition
 number of $\Sigma$ as an estimate of how difficult it is to sample from
 this posterior with an identity mass matrix.
 
@@ -446,3 +446,62 @@ TODO\dots
 \end{proof}
 
 \end{document}
+
+
+Adaptation:
+
+The adaptation algorithm for the Hamiltonian MCMC sampler is designed to
+iteratively adjust the mass matrix and step size during the warmup period. The
+algorithm operates in three distinct phases: early, middle, and final. The
+lengths of the three phases are pre-determined, and can be controlled using two
+parameters: The percentage of draws in the early phase, and the number of draws
+in the final phase. By default, the early phase is during the first 10\% (TODO)
+of warmup draws, and the final phase has a length of 60 (TODO) draws.
+
+Early Phase:
+
+In the early phase, which spans from the beginning of the tuning process to a
+certain pre-determined threshold, the algorithm focuses on swift adaptation of
+the mass matrix estimate. During this phase, two mass matrix estimators are
+maintained, both corresponding to different but overlapping windows of past
+draws. For each new draw we use the current estimate from the estimator that
+has a longer window (the foreground estimator) as mass matrix, and update both
+estimators using the new generated draw. If a divergence occurs, the estimators
+are only updated if the new draw is different from the old draw, to avoid
+variance estimates of zero. If the shorter estimator (the background estimator)
+reaches a pre-determined length (8 TODO by default), the foreground estimator
+is reinitialized, and the former background estimator will now be used as
+foreground estimator.
+
+By changing the mass matrix quickly we can avoid a lengthy and very costly
+period in which the sampler is using a high treedepth with a small step size,
+because the mass matrix is still very bad. Behavior like this can often be
+observed in models with the default PyMC or Stan samplers, where a large
+percentage of gradient evaluations happens before the first mass matrix update.
+
+While the mass matrix is estimated, we also adapt the step size with the same
+dual-average approach as Stan and PyMC, with ...TODO corrected acceptatnce
+statistic.
+
+Middle Phase:
+
+The middle phase works almost identically to the early phase, but with a lower
+switch frequency (TODO by default). We also do not switch the mass matrix
+estimator near the very end of the phase. We only switch if the remaining number
+of draws in the middle phase is smaller than the switch frequency, so that we
+can ensure that the final mass matrix estimate uses at least two times the
+switch frequency of draws. After the middle phase the mass matrix adaptation is
+finished, the final mass matrix estimate of the foreground estimator will be
+used in all further draws.
+
+Final Phase:
+
+In the final phase the algorithm ceases to switch the mass matrix estimate. The
+focus shifts entirely to adapting the step size.
+
+In the final phase we also use a symmetrized version of the acceptance
+statistic, which has the same mean but smaller variance (TODO ref), assuming
+the sampler has reached equilibrium.
+
+
+
