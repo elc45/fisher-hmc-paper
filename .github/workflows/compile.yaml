@@ -1,0 +1,38 @@
+name: Compile PDF
+
+# <https://github.com/marketplace/actions/setup-typst>
+
+on:
+- push
+- workflow_dispatch
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Install fontist
+      uses: fontist/setup-fontist@v2
+    - name: Install Fira Code font
+      run: fontist install "Fira Code"
+    - name: Install Typst
+      uses: typst-community/setup-typst@v3
+      with:
+        cache-dependency-path: requirements.typ
+    - run: typst compile main.typ main.pdf --font-path ~/.fontist/fonts
+    - name: Upload PDF artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: main
+        path: main.pdf
+    - name: Create Release
+      if: github.ref == 'refs/heads/main' # Only on main branch
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      uses: softprops/action-gh-release@v1
+      with:
+        files: main.pdf
+        tag_name: latest
+        name: Latest PDF
+        body: Automatically generated PDF
+        prerelease: false
+        generate_release_notes: false
