@@ -18,7 +18,10 @@ jobs:
       uses: typst-community/setup-typst@v3
       with:
         cache-dependency-path: requirements.typ
-    - run: typst compile main.typ main.pdf --font-path ~/.fontist/fonts
+    - name: Checkout branch
+      uses: actions/checkout@v4
+    - name: Compile
+      run: typst compile main.typ main.pdf --font-path ~/.fontist/fonts
     - name: Upload PDF artifact
       uses: actions/upload-artifact@v4
       with:
