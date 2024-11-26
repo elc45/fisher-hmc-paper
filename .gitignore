@@ -1,0 +1,10 @@
+main.pdf
+**/Untitled*
+main.aux
+main.log
+main.fls
+main.out
+.ipynb_checkpoints*
+fonts
+.vscode
+
