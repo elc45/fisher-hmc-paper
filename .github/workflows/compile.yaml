@@ -14,6 +14,8 @@ jobs:
       uses: fontist/setup-fontist@v2
     - name: Install Fira Code font
       run: fontist install "Fira Code"
+    - name: Install Garamond
+      run: fontist install "EB Garamond"
     - name: Install Typst
       uses: typst-community/setup-typst@v3
       with:
