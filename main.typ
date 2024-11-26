@@ -16,24 +16,20 @@
     ),
   ),
   abstract: [
-    Hamiltonian Monte Carlo (HMC) has become a crucial tool in Bayesian
-    inference, offering efficient exploration of complex, high-dimensional
-    parameter spaces. However, HMC’s performance is highly sensitive to the
-    geometry of the posterior distribution, which is often poorly approximated
-    by traditional mass matrix adaptations, especially in cases of non-normal or
-    correlated posteriors. In this paper, we propose an adaptive framework for
-    HMC that uses Fisher divergence to guide transformations of the parameter
-    space, generalizing the concept of a mass matrix to arbitrary
-    diffeomorphisms. By aligning the score function of the transformed posterior
-    with those of a standard normal distribution, our method identifies
-    transformations that adapt to the posterior’s scale and shape. We develop
-    theoretical foundations for these adaptive transformations, provide
-    efficient implementation strategies, and demonstrate significant sampling
-    improvements over conventional methods. Additionally, we introduce and
-    evaluate nutpie, an implementation of our method for PyMC and Stan models
-    and compare it with existing samplers across a suite of models. Our results
-    show that nutpie delivers better sampling efficiency, particularly for
-    challenging posteriors.
+    Hamiltonian Monte Carlo (HMC) is a powerful tool for Bayesian inference, as
+    it can explore complex and high-dimensional parameter spaces. But HMC’s
+    performance is highly sensitive to the geometry of the posterior
+    distribution, which is often poorly approximated by traditional mass matrix
+    adaptations, especially in cases of non-normal or correlated posteriors. We
+    propose Fisher HMC, an adaptive framework that uses the Fisher divergence to
+    guide transformations of the parameter space. It generalizes mass matrix
+    adaptation from affine functions to arbitrary diffeomorphisms. By aligning
+    the score function of the transformed posterior with those of a standard
+    normal distribution, our method identifies transformations that adapt to the
+    posterior’s scale and shape. We develop theoretical foundations efficient
+    implementation strategies, and demonstrate significant sampling
+    improvements. Our implementation, nutpie, integrates with PyMC and Stan and
+    delivers better efficiency compared to existing samplers.
   ],
   keywords: (
     "Bayesian Inference",
@@ -45,20 +41,27 @@
   date: "1. November 2024",
 )
 
+#let appendix(body) = {
+  set heading(numbering: "A", supplement: [Appendix])
+  counter(heading).update(0)
+  body
+}
+
 #set cite(style: "chicago-author-date")
 #show link: underline
 
 #show math.equation: set text(weight: 500)
 #show math.equation: set block(spacing: 0.65em)
 
-#show raw: set text(font: "Fira Code", size: 9pt)
+#show raw: set text(font: "Fira Code", size: 10pt)
 
 #show math.equation: set text(
   font: "New Computer Modern Math",
   size: 11pt,
 )
 
-#let var(x) = $op("Var", limits: #false)[#x]$
+#let ex(x) = $op("E", limits: #false)[#x]$
+#let var(x, idx: none) = $op("Var"_#idx, limits: #false)[#x]$
 #let cov(x) = $op("Cov", limits: #false)[#x]$
 #let diag(x) = $op("diag", limits: #false)(#x)$
 #let dist(x, y) = $op("dist", limits: #false)(#x, #y)$
@@ -70,61 +73,60 @@
 Hamiltonian Monte Carlo (HMC) is a powerful Markov Chain Monte Carlo (MCMC)
 method widely used in Bayesian inference for exploring complex posterior
 distributions. HMC can explore high-dimensional parameter spaces more
-efficiently than traditional MCMC techniques, making it popular in probabilistic
-programming libraries like Stan and PyMC. However, the performance of HMC
-depends critically on the parameterization of the posterior space, often framed
-in terms of a “mass matrix” that defines an inner product on this space.
-Properly tuning this parameterization is crucial for efficient sampling, but
-achieving optimal performance remains a challenging task, particularly for
-posterior distributions with complex geometries, such as those that exhibit
-strong correlations or funnel-like structures.
+efficiently than traditional MCMC techniques, which makes it popular in
+probabilistic programming libraries like Stan and PyMC. However, the performance
+of HMC depends critically on the parameterization of the posterior space. Modern
+samplers automate a part of those reparametrizations by adapting a "mass matrix"
+in the warmup phase of sampling. Tuning the mass matrix is crucial for efficient
+sampling, as tuning takes a large part of the sampling time, and has a big
+impact on the efficiency of the sampler after tuning. But even a well-tuned mass
+matrix can not do much to help us sampling from more challenging posterior
+distributions, such as those that contain strong correlations in high
+dimensional models, or that have a funnel-like structure.
+
+In most cases these problems can be overcome by careful, manual
+reparametrization of models, but this requires a lot of expertise and time. In
+many cases, good reparametrizations are also data-dependent, which makes it
+difficult to write a model once, and apply it to a wide range of individual
+datasets.
 
 A common approach in HMC is to estimate a mass matrix based on the inverse of
 the posterior covariance, typically in a diagonalized form, to adjust for
-differences in scale across dimensions. While effective in many cases, this
-method has limitations when the posterior deviates significantly from normality.
-In cases where the posterior distribution has complex geometries, relying on a
-fixed mass matrix can lead to inefficient sampling, with trajectories that fail
-to capture the underlying structure of the parameter space. This inefficiency is
-especially pronounced when dealing with correlated parameters or posteriors that
-exhibit challenging topologies, such as those commonly encountered in
-hierarchical models and large-scale datasets.
+differences in scale across dimensions. We can think of this as a
+reparametrization that simply rescales the parameters so that they have a
+posterior variance of one. It is not obvious however, that this is the best
+rescaling we could do. And at the same time it is also quite limiting, as it can
+not fix correlations or funnels in the posterior.
 
 To address these limitations, we propose an adaptive HMC framework that extends
-beyond the traditional concept of a mass matrix, using arbitrary diffeomorphisms
-to dynamically transform the parameter space. In this work, we utilize the
-Fisher divergence as a guiding criterion for these transformations, which allows us
-to adapt the geometry of the posterior space in a way that optimizes HMC’s
-efficiency. By aligning the scores (derivatives of the log-density) of
-the transformed posterior with those of a standard normal distribution, we
-approximate an idealized parameterization that promotes efficient exploration.
+beyond the traditional concept of a mass matrix: Instead of just rescaling
+variables, we allow arbitrary diffeomorphisms to dynamically transform the
+parameter space. We use the Fisher divergence as a criterion to choose between
+different transformations, which allows us to adapt the geometry of the
+posterior space in a way that optimizes HMC’s efficiency. By aligning the scores
+(derivatives of the log-density) of the transformed posterior with those of a
+standard normal distribution, we approximate an idealized parameterization that
+promotes efficient sampling.
 
-Our approach is grounded in the observation that the Fisher divergence provides
-a meaningful metric to quantifying the discrepancy between the transformed
-posterior and a normal distribution. By minimizing this divergence, we can
-identify transformations that reduce the complexity of the posterior geometry.
-This adaptive framework generalizes the mass matrix concept, but also improves
-sampling efficiency if it is employed to find better mass matrices.
-
-= Adaptive Transformations in HMC: Motivation, Theory, and Examples
+= Fisher HMC: Motivation and Theory
 
 == Motivation: Example with independent gaussian posterior
 <motivation-gaussian>
 
 When we run HMC, we compute the derivatives of the posterior log density (the
-scores). They contain a lot of information about the posterior, but when
-we compute the mass matrix, we ignore this information.
+scores). They contain a lot of information about the posterior, but when we
+compute the mass matrix using traditional methods, we ignore this information.
 
-To illustrate how useful the scores can be, let’s start very simple, and
-assume our posterior is a one dimensional normal distribution $N (mu , sigma^2)$
-with density $d mu$, and let’s assume we have two posterior draws $x_1$ and
-$x_2$, together with the covector (row-vector) of scores $alpha_i =
-frac(diff, diff x_i) log d mu (x_i) = sigma^(-2) (mu - x_i)$. Based on this
-information we can directly compute $mu$ and $sigma$, and so identify the exact
-posterior, by solving for $mu$ and $sigma$. We get $mu = dash(x) + sigma^2
-dash(alpha)$ and $sigma^2 = var(x_i)^(1/2) var(alpha_i)^(-1/2)$, where $dash(x)$
-and $dash(alpha)$ are the sample means of $x_i$ and $alpha_i$ respectively. So
-we can compute the exact posterior and ideal mass matrix with no sample variance
+To illustrate how useful the scores can be, let’s start very simple, and assume
+our posterior is a one dimensional normal distribution $N (mu , sigma^2)$ with
+density $p$. Let’s assume we have two posterior draws $x_1$ and $x_2$, together
+with the covector of scores $alpha_i = frac(diff, diff x_i) log p(x_i) =
+sigma^(-2) (mu - x_i)$. Based on this information we can directly compute $mu$
+and $sigma$, and identify the exact posterior, by solving for $mu$ and $sigma$.
+We get $mu = dash(x) + sigma^2 dash(alpha)$ and $sigma^2 = var(x_i)^(1/2)
+var(alpha_i)^(-1/2)$, where $dash(x)$ and $dash(alpha)$ are the sample means of
+$x_i$ and $alpha_i$ respectively. If we take advantage of the scores, we can
+compute the exact posterior and an ideal mass matrix with no sample variance
 based on just two points!
 
 This generalizes directly to multivariate normal posteriors $N(mu, Sigma)$.
@@ -135,128 +137,78 @@ the i-th column of $S$ is $alpha_i - dash(alpha)$, and the i-th column of $X$ is
 $x_i - dash(x)$. And finally we get $S S^T = cov(alpha_i) = Sigma^(- 1) X X^T
 Sigma^(-1) = Sigma^(-1) cov(x_i) Sigma^(- 1)$. We can recognize $Sigma$ as the
 geometric mean of the positive symmetric matrices $cov(x_i)$ and
-$cov(s_i)^(-1)$, so $Sigma = exp (log (cov(x_i)) \/ 2 - log (cov(alpha_i) \/ 2)$
-or some expression with lots of matrix square roots \(todo).
+$cov(s_i)^(-1)$, so
+
+$
+  Sigma = cov(x_i)^(-1/2)(cov(x_i)^(1/2)cov(alpha_i)cov(x_i)^(1/2))^(1/2)cov(x_i)^(-1/2)
+$
 
 Given the scores, we can compute the parameters of a normal distribution
-exactly. Most posterior distributions are not multivariate normal distributions,
-or we would not have to run MCMC in the first place. It is quite common that
-they approximate normal distributions reasonably well, so this should indicate
-that the scores contain useful information we are currently neglecting.
+exactly.
 
-== Fisher divergence
-
-todo: introduce notation $nu / omega$ for relative density.
-
-todo: Write a second version of this without all the diffgeo...
-
-Let $(Y, g)$ be a Riemannian manifold with probability volume forms $omega_1$ and
-$omega_2$. They define scalar functions $p, q in Omega^0(Y)$ relative to the
-volume form of the metric tensor $omega$ (so $omega_1 = p omega$ and $omega_2 =
-q omega$). We define the fisher divergence of $omega_1$ and $omega_2$ as
-
-$
-  D_g (omega_1, omega_2) = integral norm(d log(p) - d log(q))^2_g d omega_1.
-$
-
-Equivalently we can define $omega_1 = z omega_2$, and set
-
-$
-  D_g (omega_1, omega_2) = integral norm(d log(z))^2_g d omega_1.
-$
-
-Note that $D$ requires more structure on $Y$ than the KL-divergence ($integral log(z) d omega_1$), as the
-norm depends on the metric tensor.
-
-Given a second (non-Riemannian) manifold $X$ with a probability volume form
-$mu$, and a diffeomorphism $F: Y arrow X$, we can define the divergence between
-$mu$ and $omega_1$ by pulling back $mu$ to $X$, ie $D_g (F^* mu, omega_1)$.
-
-The way we will apply this, is by noticing that the normal distributions are
-defined in terms of a metric tensor (or in $bb(R)^n$ an inner product), because
-we can write the density as $prop exp(-1/2 dist("mean", x)^2)$. So if we compute
-the fisher divergence between a normal distribution and some other distribution, we
-can always use the metric tensor of the normal distribution.
-
-Notice, that if we were to compute the fisher divergence directly on $X$, we would have
-to take into account how the metric tensor changes with the transformation $F$:
-
-$
-  D_g (F^* mu, omega_1) = D_((F^(-1))^*g) (mu, (F^(-1))^* omega_1)
-$
-
-== Transformations of scores
-<pullbacks-of-scores>
-
-In practice, we don't work with the measure $mu$ directly, but with the density
-$mu / lambda$ (like the Radon-Nikodym derivative, also often written as $(d mu)/(d
-lambda)$) with respect to the Lebesgue measure $lambda$, and we will have
-different Lebesgue measures on $X$ and $Y$. So in order to compute $D_g (F^* mu,
-omega)$ we have to understand how to compute the score function $d log((d F^*
-mu)/(d lambda_N))$ on $Y$ if we have the score function $d log((d mu) / (d
-lambda_M))$ on $X$.
-
-$
-  d log((F^* mu)/(lambda_M))
-  &= d log((F^* mu) / (F^* lambda_N) (F^* lambda_N) / lambda_M) \
-  &= F^* d log mu / lambda_N + F^* d log (lambda_N / ((F^(-1))^* lambda_M)) \
-  &= hat(F)^*(d log mu/lambda_N, 1)
-$
-
-todo explain $hat(F)$...
-
-where $log(lambda_N / ((F^(-1))^* lambda_M))$ is the log-determinant term in
-the change-of-variable formula.
-
-We can simplify this a bit by introducing $hat(F): Y arrow X times bb(R)$
-where $hat(F)(y) = (F(y), log abs(det((partial F)/(partial y))))$
-
-For instance in Jax:
-
-```python
-def F_and_logdet(y):
-    """Compute the transformation F and its log determininant jacobian."""
-    ...
-
-def F_inv(x):
-    """Compute the inverse of F."""
-    ...
-
-def F_pullback_score(x, s_x, logp):
-    """Compute the transformed position, score and logp."""
-    y = F_inv(x)
-    (_, logdet), pullback_fn = jax.vjp(F_and_logdet, y)
-    s_y = pullback_fn(s_x, 1.0)
-    return y, s_y, logp + logdet
-```
+Most posterior distributions are not multivariate normal distributions, or we
+would not have to run MCMC in the first place. But it is quite common that they
+approximate normal distributions reasonably well, so this indicates that the
+scores contain useful information we are currently neglecting.
 
 == Transformed HMC
 <transformed-hmc>
-Given a posterior $mu$ on $X$ and a diffeomorphism $F : Y arrow X$, we
-can run HMC on the transformed space $Y$:
+When we manually reparameterize a model to make HMC more efficient, we try to
+find a transformation (a diffeomorphism) that changes our posterior distribution
+so that HMC works better, for the most part so that it resembles a standard
+normal distribtuion. Formally, if our posterior $mu$ is defined on a space $M$,
+we try to find a diffeomorphism $f: N arrow M$ (note the order here, to stay
+consistent with Normalizing Flow literature I define the transformation as a
+function #emph[to] our posterior) such that the transformed posterior $f^*mu$ is
+nice in some way. $f^* mu$ refers to the pullback of the posterior (which we
+interpret as a volume form), ie we #emph[pull it back] to the space $N$ along
+the transformation $f$. We will show later how to do this in practice.
+
+We can explicitly incorporate this transformation into HMC (or variations of it
+like NUTS):
 
 ```python
 def hmc_proposal(rng, x, mu_density, F, step_size, n_leapfrog):
-    logp_x, s_x = gradient_and_value(mu_density)(x)
-    y, s_y, logp_y = F_pullback_score(x, s_x, logp_x)
+    # Compute the log density and score (differential of the log density)
+    # at the initial point.
+    logp_x, score_x = score_and_value(mu_density)(x)
+    # Compute the log density and score in the transformed space.
+    # We will see later how to do this.
+    y, score_y, logp_y = f_pullback_score(x, score_x, logp_x)
 
+    # Sample a new velocity for our trajectory.
+    # In the transformed space we assume an identity mass matrix,
+    # so we don't have to distinguish between momentum and velocity.
     velocity = rng.normal(size=len(x))
-    for i in range(n_leapfrog):
-        # TODO just the usual leapfrog with identity mass matrix
-        pass
 
-    return
+    # Several leapfrog steps
+    for i in range(n_leapfrog):
+        # velocity half-step
+        velocity += step_size / 2 * score_y
+        # position step
+        y += step_size * velocity
+
+        # Transform back and evaluate density
+        x = f_transform(y)
+        logp_x, score_x = score_and_value(mu_density)(x)
+        y, score_y, logp_y = f_pullback_score(x, score_x, logp_x)
+
+        # second velocity half-step
+        velocity += step_size / 2 * score_y
+
+    return x
 ```
 
-If $F$ is an affine transformation, this simplifies to the usual mass-matrix
-based HMC. For instance, if we choose $F (x) = sigma dot.circle x$, this
-corresponds to the mass matrix $diag(sigma^(-2))$.
+If $f$ is an affine transformation, this simplifies to the usual mass-matrix
+based HMC. For instance, if we choose $f(x) = sigma dot.circle x$, we get the
+mass matrix $diag(sigma^(-2))$. This is explicitly spelled out in the Neal paper
+@neal_mcmc_2012.
 
 HMC efficiency is famously dependent on the parametrization, so we know that
-this is much more or less efficient for some choices of $F$ than for others. It
+this is much more or less efficient for some choices of $f$ than for others. It
 is however not obvious what criterion we could use to decide how good a
-particular choice of $F$ is. We need a loss function $D$ that maps the
-diffeomorphism to a measure of difficulty for HMC.
+particular choice of $f$ is, so that this choice can be automated. We need a
+loss function that maps the diffeomorphism to a measure of difficulty for HMC.
 
 This hard to quantify in general, but we can notice that the efficiency of HMC
 largely depends on the trajectory, and this trajectory does not depend on the
@@ -267,29 +219,128 @@ standard normal distribution. If they match well, we will use the same
 trajectory we would use for a standard normal distribution $omega$, which we
 know to be a good trajectory. And because the standard normal distribution is
 defined in terms of an inner product, we already have a well-defined norm on the
-scores that we can use to evaluate their difference. But the fisher divergence
-$D(F^* mu, omega)$ measures exactly this difference. We have
+scores that we can use to evaluate their difference. This directly motivates the
+following definition of the Fisher divergence.
+
+== Fisher divergence
+
+Let $(N, g)$ be a Riemannian manifold with probability volume forms $omega_1$
+and $omega_2$. We can define a scalar function $z$ on $N$ by $omega_2 = z
+omega_1$, or equivalently we also write this as $z = omega_2 / omega_1$.
+
+We define the fisher divergence of $omega_1$ and $omega_2$ as
 
 $
-  D(F^*mu, omega) & = integral norm( d log (F^* mu)/lambda_Y - d log omega / lambda_Y )^2_g F^* mu\
-  & = integral norm(diff / (diff y) log (hat(F)^* mu) (y) + y)^2 d F^* mu(y)\
-  & = integral norm(F^hat(*) diff / (diff x) log (d mu (x)) + y)^2 d (F^* mu) (y)
+  cal(F)_g (omega_1, omega_2) = integral norm(nabla log(z))^2_g d omega_1.
 $
 
-todo fix notation...
+Note that $cal(F)$ requires more structure on $N$ than the KL-divergence
+$integral log(z) d omega_1$, as the norm depends on the metric tensor.
 
-This is a special case of the fisher divergence between the transformed
-posterior and a standard normal distribution.
+Given a second (non-Riemannian) manifold $M$ with a probability volume form
+$mu$, and a diffeomorphism $f: N arrow M$, we can define the divergence between
+$mu$ and $omega_1$ by pulling back $mu$ to $X$, ie $D_g (f^* mu, omega_1)$.
+
+We can also compute this fisher divergence directly on $X$, by pulling back the
+metric tensor to $X$:
+
+$
+  cal(F)_g (F^* mu, omega_1) = cal(F)_((f^(-1))^*g) (mu, (f^(-1))^* omega_1)
+$
+
+In our case, $M$ is the space we originaly defined the posterior on, $mu$ is the
+posterior, and $omega_1$ is a standard normal distribution.
+
+== Sobolev divergence
+
+The fisher divergence uses the information in the scores of our posterior. It
+still ignores some additional information we have however: For each pair of
+points where we evaluate the posterior, we know the ratio of the densities at
+those points. If our transformed posterior has the density $p(x)$ and the
+standard normal distribution has density $q(x)$, then we want $p(x) / p(y)
+approx q(x) / q(y)$. We look only at pairwise ratio densities, because we don't
+know the normalization factor of our posterior, and can't compute the ratios
+$p(x) / q(x)$ directly.
+
+This leads us to the additional loss term
+
+$
+  integral integral ((log(p(x)) - log(p(y))) - (log(q(x)) - log(q(y)))^2) p(x) p(y) d x d y \
+  = var(log(p(x)) - log(q(x)), idx: p(x))
+$
+
+We extend the Fisher divergence to a (as far as I know new) divergence, the
+Sobolev divergence by adding this second term:
+
+$
+  cal(S)_g(omega_1, omega_2) = cal(F)_g(omega_1, omega_2) + integral log(z)^2
+  omega_1 - (integral log(z) omega_1)^2 = cal(F)_g(omega_1, omega_2) +
+  var(log(z), idx: omega_1)
+$
+
+The name is due to the similarity to the Sobolev norm $norm(f)_(H^1)^2$ =
+$integral abs(f)^2 + abs(nabla f)^2$.
+
+From a little bit of experimentation it seems that the Sobolev divergence can
+improve over just using the Fisher divergence, but I need to experiment more
+with this. The following will just use the Fisher divergence, and hopefully I
+can extend that to the Sobolev divergence soon.
+
+== Transformations of scores
+<pullbacks-of-scores>
+
+In practice, we don't work with the measure $mu$ directly, but with the
+densities relative to Lebesgue measures $lambda_N$ and $lambda_M$, so $mu = p
+lambda_M$ and $omega = q lambda_N$. The change-of-variable tells us that $f^*
+lambda_M = abs(det(d f)) lambda_N$. This allows us to compute the transformed
+scores $d log(f^*p / lambda_N)$:
+
+$
+  d log(f^*mu / lambda_N) = d log(f^*p / lambda_M (f^*lambda_M)/lambda_N) = f^*
+  d log(p) + d log abs(det(d f)) = hat(f)^*(d log(p), 1)
+$
+
+where $hat(f): N arrow M times bb(R), x arrow.bar (f(x), log abs(det(f)))$
+
+This allows us to implement the score pullback function in autodiff systems, for
+instance in Jax:
+
+```python
+def f_and_logdet(y):
+    """Compute the transformation F and its log determininant jacobian."""
+    ...
+
+def f_inv(x):
+    """Compute the inverse of F."""
+    ...
+
+def f_pullback_score(x, s_x, logp):
+    """Compute the transformed position, score and logp."""
+    y = F_inv(x)
+    (_, log_det), pullback_fn = jax.vjp(f_and_logdet, y)
+    s_y = pullback_fn(s_x, jnp.ones(()))
+    return y, s_y, logp + log_det
+```
+
+We can further simplify the Fisher divergence if we set $omega$ to a standard
+normal distribution, and use the standard euclidean inner product as the metric
+tensor:
+
+$
+  cal(F)(f^*mu, omega) & = integral norm( nabla log (f^* mu)/omega)^2_g f^* mu\
+  & = integral norm(hat(f)^*(d log p, 1) - d log(q))^2_g^(-1) f^* mu\
+  & = integral norm(hat(f)^*(d log p_x, 1) + x)^2 f^* mu(x)\
+$
 
 Given posterior draws $x_i$ and corresponding scores $alpha_i$ in the
 original posterior space $X$ we can approximate this expectation as
 
-$ hat(D)_F = 1 / N sum_i norm( F^(hat(*)) s_i + F^(-1) (x_i) )^2 $
+$ hat(cal(F)) = 1 / N sum_i norm( hat(f)^*(s_i, 1) + f^(-1) (x_i) )^2 $
 
 Or in code:
 
 ```python
-def log_loss(F_pullback_scores, draw_data):
+def log_loss(f_pullback_scores, draw_data):
     draws, scores, logp_vals = draw_data
     pullback = vectorize(F_pullback_scores)
     draws_y, scores_y, _ = pullback(draws, scores, logp_vals)
@@ -336,18 +387,20 @@ performance.
 <some-theoretical-results-for-normal-posteriors>
 
 If the posterior is $N (mu , Sigma)$, then the minimizers $hat(mu)$ and
-$hat(sigma)$ of $hat(D)_F)$ converge to $mu$ and $exp (1/2 log diag(Sigma) - 1/2
-log diag(Sigma^(- 1))$ respectively. This is a direct consequence of
+$hat(sigma)$ of $hat(cal(F))$ converge to $mu$ and $exp (1/2 log diag(Sigma) -
+1/2 log diag(Sigma^(- 1))$ respectively. This is a direct consequence of
 $cov(x_i) arrow Sigma$ and $cov(alpha_i) arrow Sigma^(-1)$.
 
-$D_F$ converges to $sum_i lambda_i + lambda_i^(- 1)$, where $lambda_i$ are the
-generalized eigenvalues of $Sigma$ with respect to $diag(hat(sigma)^2)$, so
-large and small eigenvalues are penalized. When we choose $diag(Sigma)$ as mass
-matrix, we effectively minimize $sum_i lambda_i$, and only penalize large
-eigenvalues. If we choose $diag(bb(E) (alpha alpha^T))$ we effectively minimize
-$sum lambda_i^(- 1)$ and only penalize small eigenvalues. But based on some
-theoretical work for multivariate normal distributions, we know that both large
-and small eigenvalues make HMC less efficient. (todo ref)
+$hat(cal(F))$ converges to $sum_i lambda_i + lambda_i^(- 1)$, where $lambda_i$
+are the generalized eigenvalues of $Sigma$ with respect to $diag(hat(sigma)^2)$,
+so large and small eigenvalues are penalized. When we choose $diag(Sigma)$ as
+mass matrix, we effectively minimize $sum_i lambda_i$, and only penalize large
+eigenvalues. If we choose $diag(bb(E) (alpha alpha^T))$ (as proposed for
+instance in #cite(<tran_tuning_2024>, form: "prose")) we effectively minimize
+$sum lambda_i^(- 1)$ and only penalize small eigenvalues. But based on
+theoretical results for multivarite normal posteriors in
+#cite(<langmore_condition_2020>, form: "prose"), we know that both large and
+small eigenvalues make HMC less efficient.
 
 We can use the result in (todo ref) to evaluate the different diagonal mass
 matrix choices on various gaussian posteriors, with different numbers of
@@ -356,11 +409,11 @@ as seen by the sampler in the transformed space.
 
 === Full mass matrix
 <full-mass-matrix>
-We choose $F_(A , mu) (y) = A y + mu$. This corresponds to a mass matrix $M = (A
-A^T)^(- 1)$. Because as we will see $hat(D)_F$ only depends on $A A^T$ and $mu$,
+We choose $f_(A , mu) (y) = A y + mu$. This corresponds to a mass matrix $M = (A
+A^T)^(- 1)$. Because as we will see $hat(cal(F))$ only depends on $A A^T$ and $mu$,
 we can restrict $A$ to be symmetric positive definite.
 
-We get $ hat(D) [F] = 1/N sum norm(A^T s_i + A^(-1) (x_i - mu))^2 $
+We get $ hat(cal(F)) [f] = 1/N sum norm(A^T s_i + A^(-1) (x_i - mu))^2 $
 
 which is minimal if $A A^T cov(x_i) A A^T = cov(alpha_i)$ (for a proof, see
 #ref(<appendix-proof-affine>)), and as such corresponds again to our earlier
@@ -380,7 +433,11 @@ ignore eigenvalues that are close to one.
 
 todo
 
-Implemented in nutpie with `nutpie.sample(model, low_rank_modified_mass_matrix=True)`
+This is implemented in nutpie with
+
+```python
+nutpie.sample(model, low_rank_modified_mass_matrix=True)
+```
 
 === Model specific diffeomorphisms
 <model-specific-diffeomorphisms>
@@ -405,7 +462,7 @@ $
   x &= z dot.circle sigma^(1 - t)
 $
 
-This suggests $F_t(sigma, z) = (sigma, sigma^(1 - t)z)$…
+This suggests $f_t(sigma, z) = (sigma, sigma^(1 - t)z)$…
 
 === Normalizing flows
 <normalizing-flows>
@@ -414,32 +471,29 @@ Normalizing flows provide a large family of diffeomorphisms that we can use to
 transform our posterior. We have rather strong requirements for the flows however:
 We need forward and inverse transformations, and we need to be able to compute the
 log determinant of the jacobian of the transformation efficiently. A well studied
-familiy of normalizing flows that provides all of those is RealMVP (todo ref).
-
-For our experiments we used the library flowjax that implemnets RealMVP and
+family of normalizing flows that provides all of those is RealNVP (todo ref).
+For our experiments we used the library flowjax that implements RealNVP and
 other normalizing flows in jax. I slightly changed the adaptation schema from
 the usual nutpie algorithm (described in more detail in the next section), so
 that for the first couple of windows only diagonal mass matrix adaptation is
 used, and only after 150 draws do we start to fit a normalizing flow.
-
 We then repeatedly run an adam optimizer on a window of draws, and use the updated
 normalizing flow to sample.
 
 Especially for larger models the size of our training data set seems to be very
 important, so I included the full trajectory of the HMC sampler as training
-data, not just the draws themselves. I think this might be usful to do even if
+data, not just the draws themselves. I think this might be useful to do even if
 the amount of training data is not a limiting factor, as we would like that the
 transformed posterior matches the normal distribution everywhere the HMC sampler
-evaluaties it, not just at those points it accepts as draws.
-
+evaluates it, not just at those points it accepts as draws.
 So far I have not tested this systematically, but my experiments suggest that
 this can help us to sample a wide range of posterior distributions a lot more
 efficiently, or also to sample many distributions that were previously not
 possible to sample without extensive manual reparametrizations. It also comes
 with a large computational cost however, as the optimization itself can take a
-long time. Luckily, it seems to run relatiely efficiently on GPUs, so that even
+long time. Luckily, it seems to run relatively efficiently on GPUs, so that even
 if the logp function itself does not lend itself to evaluation on GPUs, we can
-still spend most of the comutational time running scalable code. Often, the
+still spend most of the computational time running scalable code. Often, the
 number of gradient evaluations that are necessary to sample even complicated
 posterior distributions decrease a lot.
 
@@ -452,10 +506,10 @@ of evaluation points seems to decrease.
 
 I hope that this issue can be overcome by choosing normalizing flow layers in a
 way that takes model structure into account, or by adding layers one after the
-other, based on which parameters seem to not fit the normal distirbuito well
+other, based on which parameters seem to not fit the normal distribution well
 yet.
 
-Current code: #link("https://github.com/pymc-devs/nutpie/pull/154")
+code: #link("https://github.com/pymc-devs/nutpie/pull/154")
 
 = Adaptation schema to learn the diffeomorphism
 <adaptation-tuning-warmup-of-mass-matrix>
@@ -619,9 +673,11 @@ Code is here:
 
 todo
 
-= Appendix
+#bibliography("FisherHMCPaper.bib", style: "ieee")
 
-== Minimize Fisher divergence for affine transformations
+#show: appendix
+
+= Minimize Fisher divergence for affine transformations
 <appendix-proof-affine>
 
 $D[F]$ for $F(y) = A y + mu$ is minimal if $Sigma cov(alpha) Sigma = cov(x)$ and
