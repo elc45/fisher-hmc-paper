@@ -109,6 +109,7 @@ standard normal distribution, we approximate an idealized parameterization that
 promotes efficient sampling.
 
 
+/*
 
 Hamiltonian Monte Carlo (HMC) is a powerful Markov Chain Monte Carlo (MCMC)
 method widely used in Bayesian inference for exploring complex posterior
@@ -143,7 +144,7 @@ Fisher HMC provides a principled method for identifying parameter space
 transformations that can improve sampling efficiency for challenging posterior
 distributions.
 
-
+*/
 
 = Fisher HMC: Motivation and Theory
 
@@ -192,8 +193,10 @@ Given the scores, we can compute the parameters of a normal distribution
 exactly.
 
 Most posterior distributions are not multivariate normal distributions, or we
-would not have to run MCMC in the first place. But often our posteriors approximate  normal distributions reasonably well, so this indicates that the
-scores contain useful information we are currently neglecting.
+would not have to run MCMC in the first place. But often our posteriors
+approximate normal distributions reasonably well, which this indicates that the
+scores contain useful information that are being ignored in previous mass matrix
+adaptation methods.
 
 == Transformed HMC
 <transformed-hmc>
@@ -488,13 +491,11 @@ $cov(s_i)$.
 
 If the number of dimensions is larger than the number of draws, we can add
 regularization terms. And to avoid $O (n^3)$ computation costs, we can project
-draws and scores into the span of $x_i$ and $alpha_i$, compute the
-regularized mean in this subspace and use the mass matrix $dots.h$. If we only
-store the components, we can avoid $O (n^2)$ storage, and still do all
-operations we need for HMC quickly. To further reduce computational cost, we can
-ignore eigenvalues that are close to one.
-
-todo
+draws and scores into the span of $x_i$ and $alpha_i$, compute the regularized
+mean in this subspace and use the mass matrix $dots.h$. If we only store the
+components, we can avoid $O (n^2)$ storage, and still do all operations we need
+for HMC quickly. To further reduce computational cost, we can ignore eigenvalues
+that are close to one.
 
 This is implemented in nutpie with
 
@@ -721,9 +722,108 @@ This scheme can be used with arbitrary mass matrix estimators. If the
 estimator allows a streaming \(ref) implementation, we do not need to
 store the draws within each window.
 
+/*
+
+== Accelerated Window-Based Adaptation
+
+Most modern MCMC samplers like Stan use No-U-Turn Sampler (NUTS), which
+automatically adjusts trajectory length. However, this can become
+computationally expensive when the mass matrix is poorly adapted, often
+requiring hundreds to thousands of Hamiltonian Monte Carlo (HMC) steps per draw.
+
+The key challenge is efficiently utilizing posterior information early in the
+sampling process to minimize these long, inefficient trajectories. Typical
+adaptation strategies involve multiple phases:
+
+1. Step-Size Adaptation Window (Initial Phase)
+   - Typically 50 draws
+   - No mass matrix changes
+   - Primarily focuses on finding an appropriate step size
+
+2. Mass Matrix Adaptation Window (Main Phase)
+   - Approximately 100 draws
+   - Generate draws to estimate next mass matrix
+   - Continue using the initial mass matrix for sampling
+
+Empirically, trajectory lengths during the first 150 draws can be significantly
+longer and more variable compared to later phases. These initial draws can
+consume a substantial portion of total sampling time due to trajectory length
+variations of 10-100x.
+
+The proposed adaptation strategy addresses these challenges through:
+
+- Overlapping estimation windows
+- Streaming mass matrix estimators
+- Adaptive switching between estimation windows
+
+Key Implementation Strategy:
+```python
+def warmup(num_warmup, num_early, num_late, early_switch_freq, late_switch_freq):
+    # Initialize estimation windows and step size adaptor
+    foreground_window = MassMatrixEstimator()
+    background_window = MassMatrixEstimator()
+    step_size_estimator = StepSizeAdapt()
+
+    for draw in range(num_warmup):
+        # Dynamically adjust mass matrix and step size
+        mass_matrix = foreground_window.current()
+        step_size = step_size_estimator.current_warmup()
+
+        # Perform HMC step with current estimates
+        (accept_stat, position, score) = hmc_step(mass_matrix, step_size)
+
+        # Selectively update windows based on draw characteristics
+        foreground_window.update(position, score)
+        background_window.update(position, score)
+
+        # Adaptively switch windows to improve estimates
+        if background_window.num_points() > early_switch_freq:
+            foreground_window = background_window
+            background_window = MassMatrixEstimator()
+```
+
+Conceptual Phases:
+- Initial Phase: Small window, identify typical set
+- Main Phase: Longer, more stable windows
+- Final Phase: Constant mass matrix, step size refinement
+
+This approach balances information usage and computational efficiency by:
+- Using overlapping estimation windows
+- Allowing streaming mass matrix estimators
+- Dynamically switching between windows
+
+The method can accommodate various mass matrix estimation techniques, providing
+flexibility across different posterior distributions.
+
+
+*/
+
+
+
 = Implementation in nutpie
 
-todo
+nutpie implements:
+- New adaptation schema
+- Diagonal mass matrix adaptation based on the Fisher divergence
+- Low rank mass matrix adaptation as described here
+- Explicit transformation with normalizing flows
+
+The core algorithms are implemented in rust, which all array operations
+abstracted away, to allow users of the rust API to provide GPU implementations.
+
+It can take PyMC or Stan models.
+
+Stan is used through bridgestan, which compiles C libraries that nutpie can load
+dynamically to call the logp function gradient with little overhead.
+
+pymc models can be sampled either through the numba backend of pymc, which
+also allows evaluating the density and its gradient with little overhead.
+Alternatively, it can use the pymc jax backend. This incures a higher per-call
+overhead, but allows evaluating the density on the GPU, which can significantly
+speed up sampling for larger models.
+
+nutpie returns sampling traces as arviz datasets, to allow easy posterior analysis
+and convergence checks.
 
 = Experimental evaluation of nutpie
 <numerical-results>
