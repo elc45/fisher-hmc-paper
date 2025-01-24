@@ -38,7 +38,7 @@
     "Normalizing Flows",
     "Fisher Divergence",
   ),
-  date: "1. November 2024",
+  date: datetime.today().display(),
 )
 
 #let appendix(body) = {
@@ -117,17 +117,25 @@ When we run HMC, we compute the derivatives of the posterior log density (the
 scores). They contain a lot of information about the posterior, but when we
 compute the mass matrix using traditional methods, we ignore this information.
 
-To illustrate how useful the scores can be, let’s start very simple, and assume
-our posterior is a one dimensional normal distribution $N (mu , sigma^2)$ with
-density $p$. Let’s assume we have two posterior draws $x_1$ and $x_2$, together
-with the covector of scores $alpha_i = frac(diff, diff x_i) log p(x_i) =
-sigma^(-2) (mu - x_i)$. Based on this information we can directly compute $mu$
-and $sigma$, and identify the exact posterior, by solving for $mu$ and $sigma$.
-We get $mu = dash(x) + sigma^2 dash(alpha)$ and $sigma^2 = var(x_i)^(1/2)
-var(alpha_i)^(-1/2)$, where $dash(x)$ and $dash(alpha)$ are the sample means of
-$x_i$ and $alpha_i$ respectively. If we take advantage of the scores, we can
-compute the exact posterior and an ideal mass matrix with no sample variance
-based on just two points!
+To illustrate how useful the scores can be, let’s consider a standard normal posterior
+$N (mu , sigma^2)$ with density $p(x) prop exp(-(x - mu)^2/sigma^2)$.
+
+Let’s assume we have two posterior draws $x_1$ and $x_2$, together
+with the covector of scores
+$
+  alpha_i = frac(diff, diff x_i) log p(x_i) = sigma^(-2) (mu - x_i).
+$
+
+Based on this information we can directly compute $mu$ and $sigma$, and identify
+the exact posterior. By solving for $mu$ and $sigma$, we get
+
+$
+  mu = dash(x) + sigma^2 dash(alpha) quad "and" quad sigma^2 = var(x_i)^(1/2) var(alpha_i)^(-1/2),
+$
+where $dash(x)$ and $dash(alpha)$ are the sample means of $x_i$ and $alpha_i$
+respectively. If we take advantage of the scores, we can compute the exact
+posterior and an ideal mass matrix with no sample variance based on just two
+points!
 
 This generalizes directly to multivariate normal posteriors $N(mu, Sigma)$.
 Let’s assume we have $N + 1$ linearly independent draws $x_i$, and the
@@ -147,22 +155,27 @@ Given the scores, we can compute the parameters of a normal distribution
 exactly.
 
 Most posterior distributions are not multivariate normal distributions, or we
-would not have to run MCMC in the first place. But it is quite common that they
-approximate normal distributions reasonably well, so this indicates that the
+would not have to run MCMC in the first place. But often our posteriors approximate  normal distributions reasonably well, so this indicates that the
 scores contain useful information we are currently neglecting.
 
 == Transformed HMC
 <transformed-hmc>
 When we manually reparameterize a model to make HMC more efficient, we try to
 find a transformation (a diffeomorphism) that changes our posterior distribution
-so that HMC works better, for the most part so that it resembles a standard
-normal distribtuion. Formally, if our posterior $mu$ is defined on a space $M$,
-we try to find a diffeomorphism $f: N arrow M$ (note the order here, to stay
-consistent with Normalizing Flow literature I define the transformation as a
-function #emph[to] our posterior) such that the transformed posterior $f^*mu$ is
-nice in some way. $f^* mu$ refers to the pullback of the posterior (which we
-interpret as a volume form), ie we #emph[pull it back] to the space $N$ along
-the transformation $f$. We will show later how to do this in practice.
+so that HMC works better. Ideally, our transformed posterior resembles a
+standard normal distribution.
+
+Formally, if our posterior $mu$ is defined on a space $M$, we try to find a
+diffeomorphism $f: N arrow M$ such that the transformed posterior $f^*mu$ is
+nice in some way. Note that I define the transformation as a function
+#emph[from] the transformed space #emph[to] the original posterior, to stay
+consistent with the Normalizing flow literature. Since the transformation is a
+bijection, we can choose any direction we want, as long as we stay consistent
+with our choice.
+
+$f^* mu$ refers to the pullback of the posterior (which we interpret as a volume
+form), ie we #emph[pull it back] to the space $N$ along the transformation $f$.
+We will show later how to do this in practice.
 
 We can explicitly incorporate this transformation into HMC (or variations of it
 like NUTS):
@@ -200,15 +213,16 @@ def hmc_proposal(rng, x, mu_density, F, step_size, n_leapfrog):
 ```
 
 If $f$ is an affine transformation, this simplifies to the usual mass-matrix
-based HMC. For instance, if we choose $f(x) = sigma dot.circle x$, we get the
-mass matrix $diag(sigma^(-2))$. This is explicitly spelled out in the Neal paper
+based HMC. For example, choosing $f(x) = Sigma^(1/2)x + mu$ corresponds to the
+mass matrix $Sigma^(-1)$. This is described in more detail in the Neal paper
 @neal_mcmc_2012.
 
-HMC efficiency is famously dependent on the parametrization, so we know that
-this is much more or less efficient for some choices of $f$ than for others. It
-is however not obvious what criterion we could use to decide how good a
-particular choice of $f$ is, so that this choice can be automated. We need a
-loss function that maps the diffeomorphism to a measure of difficulty for HMC.
+HMC efficiency is famously dependent on the parametrization, so we know that the
+transformed HMC will be much more or less efficient for some choices of $f$ than
+for others. It is however not obvious what criterion we could use to decide how
+good a particular choice of $f$ is, so that this choice can be automated. We
+need a loss function that maps the diffeomorphism to a measure of difficulty for
+HMC.
 
 This hard to quantify in general, but we can notice that the efficiency of HMC
 largely depends on the trajectory, and this trajectory does not depend on the
@@ -342,9 +356,19 @@ Or in code:
 ```python
 def log_loss(f_pullback_scores, draw_data):
     draws, scores, logp_vals = draw_data
-    pullback = vectorize(F_pullback_scores)
+    pullback = vectorize(f_pullback_scores)
     draws_y, scores_y, _ = pullback(draws, scores, logp_vals)
     return log((draws_y + scores).sum(0).mean())
+
+def log_sobolev_loss(f_pullback_scores, draw_data):
+    draws, scores, logp_vals = draw_data
+    pullback = vectorize(f_pullback_scores)
+    draws_y, scores_y, logp_y = pullback(draws, scores, logp_vals)
+
+    fisher_loss = (draws_y + scores).sum(0).mean()
+    std_normal_logp = - draws_y @ draws_y / 2
+    var_loss = (logp_y - std_normal_logp).var()
+    return log(fisher_loss + var_loss)
 ```
 
 Note: Some previous literature (todo ref) proposed to minimize $bb(E) [alpha_x^T
@@ -535,12 +559,12 @@ mass matrix (or equivalently an affine bijection).
 == Choice of initial position
 <choice-of-init-point>
 
-Stan draws initial points independently for each chain from the interval $(-1,
-1)$ on the unconstrained space. I don't have any clear data to suggest so, but
-for some time PyMC has initialized using draws from the prior instead, and it
-seems to me that this tends to be more robust. This is of course only possible
-for model definition languages that allow prior sampling, and would for instance
-be difficult to implement in Stan.
+Stan draws initial points independently for each chain from the interval $(-2,
+2)$ on the unconstrained space. I don't have any clear data to suggest so, but
+for some time PyMC has initialized using draws around the prior mode instead,
+and it seems to me that this tends to be more robust. This is of course only
+possible for model definition languages that allow prior sampling, and would for
+instance be difficult to implement in Stan.
 
 == Choice of initial diffeomorphism
 <choice-of-initial-mass-matrix>
