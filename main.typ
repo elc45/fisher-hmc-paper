@@ -108,6 +108,43 @@ posterior space in a way that optimizes HMC’s efficiency. By aligning the scor
 standard normal distribution, we approximate an idealized parameterization that
 promotes efficient sampling.
 
+
+
+Hamiltonian Monte Carlo (HMC) is a powerful Markov Chain Monte Carlo (MCMC)
+method widely used in Bayesian inference for exploring complex posterior
+distributions. Its performance critically depends on the parameterization of the
+posterior space.
+
+Modern samplers attempt to automate reparametrization by adapting a "mass
+matrix" during the warmup phase of sampling. For researchers working with
+multilevel hierarchical models with correlated group-level parameters, manually
+rescaling and rotating the parameter space to improve sampling efficiency
+requires deep statistical expertise and can be time-consuming.
+
+Existing techniques, such as diagonal mass matrix adaptation, offer limited
+improvements. They typically rescale variables to have unit posterior variance
+but cannot adequately address more complex geometric challenges like strong
+correlations or funnel-like posterior structures. These reparametrizations are
+often data-dependent, making it difficult to develop generalizable modeling
+approaches.
+
+To address these limitations, we propose Fisher HMC, an adaptive framework that
+extends beyond traditional mass matrix adaptation. By using Fisher divergence to
+guide transformations of the parameter space, our method adaptively adjusts the
+posterior geometry to optimize sampling efficiency.
+
+Our approach introduces:
+
+1. A novel diffeomorphism selection criterion based on score alignment
+2. A flexible transformation approach that goes beyond simple rescaling
+3. Theoretical foundations for identifying parameter space transformations
+
+Fisher HMC provides a principled method for identifying parameter space
+transformations that can improve sampling efficiency for challenging posterior
+distributions.
+
+
+
 = Fisher HMC: Motivation and Theory
 
 == Motivation: Example with independent gaussian posterior
@@ -224,16 +261,18 @@ good a particular choice of $f$ is, so that this choice can be automated. We
 need a loss function that maps the diffeomorphism to a measure of difficulty for
 HMC.
 
-This hard to quantify in general, but we can notice that the efficiency of HMC
+This is hard to quantify in general, but we can notice that HMC efficiency
 largely depends on the trajectory, and this trajectory does not depend on the
-density directly, but only the scores. We also know that HMC is efficient if the
-posterior is a standard normal distribution. So a reasonable loss function can
-ask how different the scores on the transformed space are from the scores of a
-standard normal distribution. If they match well, we will use the same
-trajectory we would use for a standard normal distribution $omega$, which we
-know to be a good trajectory. And because the standard normal distribution is
-defined in terms of an inner product, we already have a well-defined norm on the
-scores that we can use to evaluate their difference. This directly motivates the
+density directly, but only on the scores. We also know that HMC is efficient
+when the posterior resembles a standard normal distribution. So, a reasonable
+loss function can assess how well the transformed space's scores align with
+those of a standard normal distribution. And if the scores match closely, we a
+similar trajectory as we would for a standard normal distribution, which we know
+to be effective. This still leaves the question, which norm we want to use to
+compare the scores of the standard normal distribution with the scores of the
+transformed posterior. But since the standard normal distribution is defined in
+terms of an inner product, we already have a well-defined norm on the scores
+that allows us to evaluate their difference. This directly motivates the
 following definition of the Fisher divergence.
 
 == Fisher divergence
