@@ -230,10 +230,10 @@ We focus on three families of diffeomorphisms $F$, for which derive specific res
 
 If we choose $F_(sigma , mu) : Y arrow X$ as $x arrow.bar y dot.circle sigma +
 mu$, we are effectively doing diagonal mass matrix estimation. In this case, 
-the Fisher divergence reduces to
+the sample Fisher divergence reduces to
 
 $
-  hat(D)_(sigma , mu) = 1 / N sum_i norm(sigma dot.circle alpha_i
+  hat(F)_(sigma , mu)(f^*Y, Z) = 1 / N sum_i norm(sigma dot.circle alpha_i
   + sigma^(-1) dot.circle (x_i - mu))^2
 $
 
@@ -454,32 +454,37 @@ size per time...
 #pagebreak()
 #show: appendix
 
-= Minimize Fisher divergence for affine transformations
+= Minimize Fisher divergence for Affine Transformations
 <appendix-proof-affine>
 
-$D[F]$ for $F(y) = A y + mu$ is minimal if $Sigma cov(alpha) Sigma = cov(x)$ and
+Here we prove that $hat(F)$ for $F(y) = A y + mu$ is minimal when $Sigma cov(alpha) Sigma = cov(x)$ and
 $mu = dash(x) + Sigma dash(alpha)$, where $Sigma = A A^T$:
 
-We collect all $alpha_i$ in the columns of $G$, and all $x_i$ in the columns of
-$X$. Let $e$ we the vector containing only ones. And let $Sigma = A A^T$.
+Let $G$ be the matrix of scores, with $alpha_i$ as the $i$th column, and similarly let 
+$X$ be the draws matrix, consisting of $x_i$ as the $i$'th column,
+and $Sigma = A A^T$. The Fisher divergence between some $p$ and $N(0,1)$ is 
+$
+  E_p [norm(nabla log p(x) - X)^2]
+$
+We then have
 
 $
-  D = 1 / N norm(A^T G + A^(-1) (X - mu e^T))_F^2 \
+  hat(F) = 1 / N norm(A^T G + A^(-1) (X - mu bold(1)^T))_F^2 \
 $
 
 === Find $hat(mu)$
 
-Take the differential with respect to only $mu$:
+Differentiating with respect to $mu$, we have:
 
 $
-  d D &= -2 / N tr[(A^T G + A^(-1) (X - mu e^T))^T A^(-1) d mu e^T] \
-  &= -2 / N tr[e^T (A^T G + A^(-1) (X - mu e^T))^T A^(-1) d mu]
+  d hat(F) &= -2 / N tr[(A^T G + A^(-1) (X - mu bold(1)^T))^T A^(-1) d mu bold(1)^T] \
+  &= -2 / N tr[bold(1)^T (A^T G + A^(-1) (X - mu bold(1)^T))^T A^(-1) d mu]
 $
 
-At a minimum of $D$ this has to be zero for all $d mu$, which is the case iff
+Setting this to zero,
 
 $
-  e^T (A^T G + A^(-1) (X - mu e^T))^T A^(-1) = 0
+  bold(1)^T (A^T G + A^(-1) (X - mu bold(1)^T))^T A^(-1) = 0
 $
 
 It follows that
