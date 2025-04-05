@@ -462,23 +462,25 @@ $mu = dash(x) + Sigma dash(alpha)$, where $Sigma = A A^T$:
 
 Let $G$ be the matrix of scores, with $alpha_i$ as the $i$th column, and similarly let 
 $X$ be the draws matrix, consisting of $x_i$ as the $i$'th column,
-and $Sigma = A A^T$. The Fisher divergence between some $p$ and $N(0,1)$ is 
+and $Sigma = A A^T$. The Fisher divergence between some $p$ and $N(0,I_d)$ is 
 $
-  E_p [norm(nabla log p(x) - X)^2]
+  E_p [norm(nabla log p(x) + X)^2]
 $
-We then have
+and then the estimated divergence is 
 
 $
-  hat(F) = 1 / N norm(A^T G + A^(-1) (X - mu bold(1)^T))_F^2 \
+  hat(F) = 1/N norm(G+X)^2
 $
+Now, for some transformed $y=A^(-1)(x-mu)$, we have
 
-=== Find $hat(mu)$
+$
+hat(F)_y = 1/N norm(A^T G + Y)^2 = 1/N norm(A^T G + A^(-1)(X - mu 1^T))_F^2
+$
 
 Differentiating with respect to $mu$, we have:
 
 $
-  d hat(F) &= -2 / N tr[(A^T G + A^(-1) (X - mu bold(1)^T))^T A^(-1) d mu bold(1)^T] \
-  &= -2 / N tr[bold(1)^T (A^T G + A^(-1) (X - mu bold(1)^T))^T A^(-1) d mu]
+  (d hat(F)) / (d mu) &= -2 / N tr[bold(1)^T (A^T G + A^(-1) (X - mu bold(1)^T))^T A^(-1)]
 $
 
 Setting this to zero,
@@ -490,44 +492,38 @@ $
 It follows that
 
 $
-  mu = dash(x) + Sigma dash(alpha)
+  mu^* = dash(x) + Sigma dash(alpha)
 $
 
-=== Find $hat(A)$
-
-Take the differential of $D$ with respect to $A$
+Differentiating with respect to $A$:
 
 $
-  d D = 2 / N tr[(A^T G + A^(-1) (X - mu e^T))^T (d A^T G - A^(-1) d A A^(-1) (X - mu e^T))]
+  d hat(F) = 2 / N tr[(A^T G + A^(-1) (X - mu bold(1)^T))^T (d A^T G - A^(-1) d A A^(-1) (X - mu bold(1)^T))]
 $
 
-Using the result for $mu$ we get $X - mu e^T = tilde(X) - Sigma dash(alpha)
-e^T$. This, and using cyclic and transpose properties of the trace gives us
+Plugging in the result for $mu^*$ and using the cyclic- and transpose-invariance properties of the trace gives us
 
 $
-  d D &= 2 / N tr[(A^T G + A^(-1) (tilde(X) - Sigma dash(alpha) e^T)) G^T d A] \
-  &quad +2 / N tr[A^(-1) (Sigma dash(alpha) e^T - tilde(X))(A^T G + A^(-1) (tilde(X) - Sigma dash(alpha) e^T))^T A^(-1) d A ]
+  d hat(F) &= 2 / N tr[(A^T G + A^(-1) (tilde(X) - Sigma dash(alpha) bold(1)^T)) G^T d A] \
+  &quad +2 / N tr[A^(-1) (Sigma dash(alpha) bold(1)^T - tilde(X))(A^T G + A^(-1) (tilde(X) - Sigma dash(alpha) bold(1)^T))^T A^(-1) d A ]
+$
+where $tilde(X) = X - dash(x) bold(1)^T$, the matrix with centered $x_i$ as the
+columns. This is zero for all $d A$ iff
+$
+  0 = (A^T G + A^(-1) (tilde(X) - Sigma dash(alpha) bold(1)^T)) G^T
+  + A^(-1) (Sigma dash(alpha) bold(1)^T - tilde(X))(A^T G + A^(-1) (tilde(X) - Sigma dash(alpha) bold(1)^T))^T A^(-1) \
+  = A^T tilde(G) G^T + A^(-1) tilde(X) G^T + (A^T dash(alpha) bold(1)^T - A^(-1) tilde(X))(tilde(G)^T + tilde(X)^T Sigma^(-1)),
 $
 
-This is zero for all $d A$ iff
+Where similarly $tilde(G) = G - dash(alpha) bold(1)^T$. Because $bold(1)^T tilde(X)^T = bold(1)^T
+tilde(G)^T = 0$, this expands to
 $
-  0 = (A^T G + A^(-1) (tilde(X) - Sigma dash(alpha) e^T)) G^T
-  + A^(-1) (Sigma dash(alpha) e^T - tilde(X))(A^T G + A^(-1) (tilde(X) - Sigma dash(alpha) e^T))^T A^(-1) \
-  = A^T tilde(G) G^T + A^(-1) tilde(X) G^T + (A^T dash(alpha) e^T - A^(-1) tilde(X))(tilde(G)^T + tilde(X)^T Sigma^(-1)),
+  0 = A^T tilde(G) G^T + A^(-1) tilde(X) G^T - A^(-1) tilde(X) tilde(G)^T - A^(-1)
+  tilde(X) tilde(X)^T Sigma^(-1)
 $
-
-where $tilde(X) = X - dash(x) e^T$, the matrix with centered $x_i$ in the
-columns, and $tilde(G) = G - dash(alpha) e^T$. Because $e^T tilde(X)^T = e^T
-tilde(G)^T = 0$ we get
 $
-  A^T tilde(G) G^T + A^(-1) tilde(X) G^T - A^(-1) tilde(X) tilde(G)^T - A^(-1)
-  tilde(X) tilde(X)^T Sigma^(-1) = 0
-$
-
-Or
-$
-  (tilde(G) + Sigma^(-1)tilde(X)) G^T - Sigma^(-1) tilde(X) tilde(G)^T - Sigma^(-1) tilde(X) tilde(X)^T Sigma^(-1) \
-  = tilde(G) G^T + Sigma^(-1) tilde(X) e dash(alpha)^T - Sigma^(-1) tilde(X) tilde(X)^T Sigma^(-1) \
+  = (tilde(G) + Sigma^(-1)tilde(X)) G^T - Sigma^(-1) tilde(X) tilde(G)^T - Sigma^(-1) tilde(X) tilde(X)^T Sigma^(-1) \
+  = tilde(G) G^T + Sigma^(-1) tilde(X) bold(1) dash(alpha)^T - Sigma^(-1) tilde(X) tilde(X)^T Sigma^(-1) \
   = tilde(G) tilde(G)^T - Sigma^(-1) tilde(X) tilde(X)^T Sigma^(-1)
 $
 

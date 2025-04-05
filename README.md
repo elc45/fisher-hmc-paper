@@ -1,3 +1,3 @@
 # If Only My Posterior Were Normal: Introducing Fisher HMC
 
-[Download Latest PDF](https://github.com/aseyboldt/covadapt-paper/releases/download/latest/main.pdf)
+[Download Latest PDF](https://github.com/elc45/fisher-hmc-paper/download/latest/main.pdf)
