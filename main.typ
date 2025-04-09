@@ -1,6 +1,6 @@
 #import "@preview/arkheion:0.1.0": arkheion, arkheion-appendices
-#import "@preview/algorithmic:0.1.0"
-#import algorithmic: algorithm
+
+#import "@preview/algo:0.3.6": algo, i, d, comment, code
 
 #show: set text(size: 12pt)
 
@@ -55,7 +55,7 @@
 #show math.equation: set text(weight: 500)
 #show math.equation: set block(spacing: 0.65em)
 
-#show raw: set text(font: "Fira Code", size: 10pt)
+
 
 #show math.equation: set text(
   font: "New Computer Modern Math",
@@ -87,8 +87,8 @@ posterior variance of one. It is not obvious, however, that this is the best
 rescaling that can be done. Morever, even a well-tuned mass
 matrix can not do much to help us when sampling from more challenging posterior
 distributions such as those with strong correlations in high
-dimensions, or with funnel-like pathologies. For researchers working with multilevel
- hierarchical models with correlated group-level parameters, manually
+dimensions, or with funnel-like pathologies. For researchers working with multilevel 
+hierarchical models with correlated group-level parameters, manually
 rescaling and rotating the parameter space to improve sampling efficiency
 requires deep statistical expertise and can be time-consuming. 
 In many cases, good reparametrizations are also data-dependent, which makes it
@@ -103,7 +103,12 @@ different transformations, which allows us to adapt the geometry of the
 posterior space in a way that optimizes HMC's efficiency. By aligning the scores
 (derivatives of the log-density) of the transformed posterior with those of a
 standard normal distribution, we approximate an idealized parameterization that
-facilitates efficient sampling.
+facilitates efficient sampling. In the first section, we motivate why the scores 
+are useful for for Hamiltonian dynamics. We then present the Fisher divergence as a 
+metric by which we can assess the transformations of target distributions, deriving 
+closed-form solutions for optimal diffeomorphisms in the affine case, i.e. mass matrices.
+Finally, we suggest additional modifications to the adaptation schedule shared by the major 
+software implementations, which complement gradient-based adaptation.
 
 
 = Fisher HMC: Motivation and Theory
@@ -225,7 +230,7 @@ and $omega_1$ is the standard normal distribution.
 == Affine choices for the diffeomorphism $F$
 <specific-choices-for-the-diffeomorphism-f>
 
-We focus on three families of diffeomorphisms $F$, for which derive specific results.
+We focus on three families of affine diffeomorphisms $F$, for which derive specific results.
 
 === Diagonal mass matrix
 <diagonal-mass-matrix>
@@ -235,7 +240,7 @@ mu$, we are effectively doing diagonal mass matrix estimation. In this case,
 the sample Fisher divergence reduces to
 
 $
-  hat(F)_(sigma , mu)(f^*Y, Z) = 1 / N sum_i norm(sigma dot.circle alpha_i
+  hat(F)_(sigma , mu)(f^*Y, N(0,I_d)) = 1 / N sum_i norm(sigma dot.circle alpha_i
   + sigma^(-1) dot.circle (x_i - mu))^2
 $
 
@@ -288,38 +293,44 @@ $cov(s_i)$.
 
 === Diagonal plus low-rank
 
-If the number of dimensions is larger than the number of draws, we can add
-regularization terms. And to avoid $O (n^3)$ computation costs, we can project
-draws and scores into the span of $x_i$ and $alpha_i$ and compute the regularized
-mean in this subspace. If we only store the
-components, we can avoid $O (n^2)$ storage, and still do all operations we need
-for HMC quickly. To further reduce computational cost, we can ignore eigenvalues
-that are close to one with a cutoff parameter $c$. The algorithm is as follows:
+We can also approximate the full mass matrix with a "diagonal plus low-rank" matrix, 
+in high dimensional settings to save computation or if the number of dimensions is 
+larger than the number of available draws. We must regularize so that the draws and scores 
+share a common scale, otherwise the two sources of information might have 
+dramatically different weights in the calculation of $Sigma$. And to avoid 
+$O (n^3)$ computation costs, we can project draws and scores into the span 
+of $x_i$ and $alpha_i$ and compute the regularized mean in this subspace. 
+We can also avoid $O (n^2)$ storage, and still do all operations we need for 
+HMC, if we only store the eigenvectors and eigenvalues. To further reduce 
+computational cost, we can ignore eigenvalues that are close to one with a 
+cutoff parameter $c$. The algorithm is as follows:
 
-#algorithm({
-  import algorithmic: *
-  Function("Low-Rank-Adapt", args: ("D", "G", "c"), {
-    Cmt[Combine bases]
-    Assign([$U^D$], FnI[SVD][$D$])
-    Assign([$U^G$], FnI[SVD][$G$])
-    Assign[$S$][$[U^D  U^G]$]
-    State[]
-    Cmt[Get jointly-spanned orthonormal basis]
-    Assign([$Q$, \_],FnI[QR_thin][$S$])
-    Assign[$P^D$][$Q^T D$]
-    Assign[$P^G$][$Q^T G$]
-    State[]
-    Assign[$C^D$][$P^D (P^D)^T + gamma I$]
-    Assign[$C^G$][$P^D (P^D)^T + gamma I$]
-    State[]
-    Assign([$Sigma$],FnI[spdm][$C^D, C^G$])
-    State[]
-    Assign([$U Lambda U^(-1)$],FnI[eigendecompose][$Sigma$])
-    Assign[$U_c$][${U_i: i in {i: lambda_i >= c}}$]
-    Assign[$M$][$Q U_c (Lambda_c - 1) U_c^T + I$]
-    Return[$M$]
-  })
-})
+#algo(
+  line-numbers: false,
+  block-align: none,
+  title: "low-rank-adapt",
+  stroke: none,
+  fill: none,
+  parameters: ($D$, $G$, $c$, $gamma$),
+)[
+    $U^D <-$ #smallcaps("svd")$(D), U^G <-$ #smallcaps("svd")$(G)$\
+    $S <- \[U^D space U^G\]$ #comment[Combine bases]\
+    $Q, \_\_ <-$ #smallcaps("qr-thin")$(S)$ #comment[Get jointly-spanned orthonormal basis]\
+    $P^D <- Q^T D, P^G <- Q^T G$ #comment[Project draws, grads onto shared subspace]\
+    \
+    $C^D <- P^D (P^D)^T + gamma I$ #comment[Get empirical covariance matrices, regularize]\
+    $C^G <- P^D (P^D)^T + gamma I$\
+    \
+    $Sigma <-$ #smallcaps("spdm")$(C^D, C^G)$ #comment[Solve $Sigma C^(G) Sigma = C^(D) "for" Sigma$]\
+    \
+    $U Lambda U^(-1) <-$ #smallcaps("eigendecompose")$(Sigma)$ #comment[Extract eigenvalues to subset]\
+    \
+    $U_c <- {U_i: i in {i: lambda_i >= c "or" <= 1/c}}$\
+    $Lambda_c <- {lambda_i: i in {i: lambda_i >= c "or" <= 1/c}}$\
+    \
+    $M <- Q U_c (Lambda_c - 1) U_c^T + I$\
+    return $M$
+  ]
 
 By subtracting the identity matrix from the diagonal matrix of eigenvalues, we obtain a 
 matrix whose eigenvalues include all those of $Sigma$ which are sufficiently far 
@@ -341,20 +352,10 @@ unchanged for a number of years. PyMC, Numpyro, and Blackjax all use the
 same details as Stan, with at most minor modifications. There are, however, a couple of 
 small changes that improve the efficiency of this schema significantly.
 
-== Choice of initial position
-<choice-of-init-point>
-
-Stan draws initial points independently for each chain from the interval $(-2,
-2)$ on the unconstrained space. I don't have any clear data to suggest so, but
-for some time PyMC has initialized using draws around the prior mode instead,
-and it seems to me that this tends to be more robust. This is of course only
-possible for model definition languages that allow prior sampling, and would for
-instance be difficult to implement in Stan.
-
 == Choice of initial diffeomorphism
 <choice-of-initial-mass-matrix>
 
-Stan starts the first adaptation with an identity mass matrix. The very first
+Stan's sampler begins its first adaptation using an identity mass matrix. The very first
 HMC trajectories seem to be overall much more reasonable if we use
 $M=diag(alpha_0^T alpha_0)$ instead. This also makes the initialization
 independent of variable scaling.
@@ -362,9 +363,10 @@ independent of variable scaling.
 == Accelerated Window-Based Adaptation
 <accelerated-window-based-adaptation-warmuptuning-scheme>
 
-Stan and other samplers do not run vanilla HMC, but often the No-U-Turn Sampler (NUTS), where 
-the Hamiltonian trajectory length is chosen automatically. This can make it very costly to
-generate draws if the mass matrix is not adapted well, because in those cases we
+Stan and other samplers do not run vanilla HMC, but usually variants, most notably the 
+No-U-Turn Sampler (NUTS) #cite(<hoffman_nuts_2011>), where 
+the length of the Hamiltonian trajectory is chosen dynamically. This can make it very costly to
+generate draws if the mass matrix is not well adapted, because in those cases we
 often use a large number of HMC steps for each draw (typically up to 1000). Thus 
 very early on during sampling, we have a large incentive to use
 available information about the posterior as quickly as possible, to avoid these
@@ -413,6 +415,78 @@ and convergence checks.
 We run nutpie and cmdstan on posteriordb to compare performance in terms of
 effective sample size per gradient evaluation and in terms of effective sample
 size per time...
+
+#algo(
+  line-numbers: false,
+  block-align: none,
+  title: "leapfrog",
+  stroke: none,
+  fill: none,
+  parameters: ($theta$, $rho$, $L$, $h$),
+ )[
+    $theta^(0) <- theta, rho^(0) <- rho$\
+    for $i "from" 0 "to" L$:#i\
+      $rho^((i+1/2)) <- rho^((i))- h/2 nabla U(theta^((i)))$ #comment[half-step momentum]\
+      $theta^((i+1)) <- theta^((i)) + h rho^((i + 1/2))$ #comment[full-step position]\
+      $rho^((i+1)) <- rho^((i+ 1/2))- h/2 nabla U(theta^((i+1)))$ #comment[half-step momentum]#d\
+    return $(theta^((L)),rho^((L)))$
+  ]
+
+#algo(
+  line-numbers: false,
+  block-align: none,
+  title: "nuts",
+  stroke: none,
+  fill: none,
+  parameters: ($theta$, $h$, $epsilon$, $M$),
+ )[
+    $rho ~ N(0,I_(d times d))$ #comment[refresh momentum]\
+    $B ~ "Unif"({0,1}^M)$ #comment[resample Bernoulli process]\
+    $(a,b,\_) <-$ #smallcaps("orbit-select") $(theta, rho, B, epsilon)$\
+    $(theta^*,\_,\_) <-$ #smallcaps("index-select") $(theta, rho, a, b, epsilon)$\
+    return $theta^*$
+  ]
+
+#algo(
+  line-numbers: false,
+  block-align: none,
+  title: "orbit-select",
+  stroke: none,
+  fill: none,
+  parameters: ($theta$, $rho$, $B$, $epsilon$),
+ )[
+    $a,b <- 0$\
+    for $i$ from 0 to len($B$):#i\
+      $tilde(a) <- a + (-1)^(B_i)2^(i-1), tilde(b) <- b + (-1)^(B_i)2^(i-1)$\
+      $II_("U-Turn") <-$ #smallcaps("U-Turn") $(a,b,theta,rho,epsilon)$\
+      $II_("Sub-U-Turn") <-$ #smallcaps("Sub-U-Turn") $(tilde(a), tilde(b), theta, rho, epsilon)$\
+      if $max(II_("U-Turn"),II_("Sub-U-Turn"))=0$:#i\
+        $a <- min(a,tilde(a)), b <- max(b,tilde(b))$#d\
+      else:#i\
+        break #d #d\
+    return $a,b,nabla H$
+  ]
+
+#algo(
+  line-numbers: false,
+  block-align: none,
+  title: "index-select",
+  stroke: none,
+  fill: none,
+  parameters: ($theta$, $rho$, $a$, $b$, $epsilon$),
+ )[
+    $a,b <- 0$\
+    for $i$ from 0 to len($B$):#i\
+      $tilde(a) <- a + (-1)^(B_i)2^(i-1), tilde(b) <- b + (-1)^(B_i)2^(i-1)$\
+      $II_("U-Turn") <-$ #smallcaps("U-Turn") $(a,b,theta,rho,epsilon)$\
+      $II_("Sub-U-Turn") <-$ #smallcaps("Sub-U-Turn") $(tilde(a), tilde(b), theta, rho, epsilon)$\
+      if $max(II_("U-Turn"),II_("Sub-U-Turn"))=0$:#i\
+        $a <- min(a,tilde(a)), b <- max(b,tilde(b))$#d\
+      else:#i\
+        break #d #d\
+    return $a,b,nabla H$
+  ]
+
 
 #pagebreak()
 #bibliography("FisherHMCPaper.bib", style: "ieee")
