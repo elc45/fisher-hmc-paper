@@ -77,7 +77,7 @@ Hamiltonian Monte Carlo (HMC) is a powerful Markov Chain Monte Carlo (MCMC)
 method widely used in Bayesian inference for sampling from complex posterior
 distributions. HMC can explore high-dimensional parameter spaces more
 efficiently than traditional MCMC techniques, which makes it popular in
-probabilistic programming libraries like Stan #cite(<carpenter_stan_2017>, form: "prose") and PyMC. However, the performance
+probabilistic programming libraries like Stan #cite(<carpenter_stan_2017>) and PyMC. However, the performance
 of HMC depends critically on the parameterization of the posterior space. Modern
 samplers automate a part of these reparametrizations by adapting a "mass matrix"
 in the warmup phase of sampling. A common approach in HMC is to estimate a mass 
@@ -241,7 +241,7 @@ mu$, we are effectively doing diagonal mass matrix estimation. In this case,
 the sample Fisher divergence reduces to
 
 $
-  hat(cal(F))_(sigma , mu)(f^*Y, N(0,I_d)) = 1 / N sum_i norm(sigma dot.circle alpha_i
+  hat(cal(F))_(sigma , mu)(f^*X, N(0,I_d)) = 1 / N sum_i norm(sigma dot.circle alpha_i
   + sigma^(-1) dot.circle (x_i - mu))^2
 $
 
@@ -296,34 +296,36 @@ $cov(s_i)$.
 
 Either to save computation in high dimensional settings, or if the number of dimensions is 
 larger than the number of available draws at the time of adaptation, we can also approximate 
-the full mass matrix with a "diagonal plus low-rank" matrix. We can view this as the 
-composition of two affine transformations, the first one being the element-wise (diagonal) affine 
+the full mass matrix with a "diagonal plus low-rank" matrix. This low rank matrix is parametrized 
+by a cutoff $c$, determining a critical distance from one at which point we ignore eigenvectors, 
+returning a truncated set of eigenvectors $U_c$ and corresponding eigenvalues $Lambda_c$ of $Sigma$. 
+In fact, we implement this as the composition of two affine transformations, the first one being the element-wise (diagonal) affine 
 transformation defined earlier, and the second a low-rank approximation to the geometric 
-mean of the draw and gradient empirical covariance matrices. For this approximation we regularize so that the draws 
-and scores share a common scale, otherwise the two sources of information might have 
-dramatically different weights in the calculation of $Sigma$. 
-We project draws and scores into the joint span 
-of $x_i$ and $alpha_i$ and compute the mean in this subspace. 
-We can also avoid $O (n^2)$ storage by only storing the eigenvectors and eigenvalues, 
+mean of the draw and gradient empirical covariance matrices. The corresponding 
+normalizing flow is $f = f_(A,mu) compose f_(sigma, mu)$. Note that when we apply this 
+transformation via $M$, though, it occurs as
+
+$
+  M = D^(1/2) (Q U_c (Lambda_c - 1) Q U_c^T + I)D^(1/2)
+$ 
+
+where $Q$ is an orthonormal basis for the shared subspace, which we'd like to optimize over $(D, U, Lambda)$. To do this, we do a greedy optimization 
+where we first apply the optimal element-wise rescaling factor $sqrt(x_i / alpha_i)$, "pulling back" $mu$ to 
+an intermediate space, from which we then optimize a low-rank transformation to the final 
+transformed posterior. For this second leg of optimization, we project $x_i$ and $alpha_i$ into 
+their joint span, compute the geometric mean in this subspace as in #ref(<full-mass-matrix>), and 
+then decompose the resulting $Sigma$. We avoid $O (n^2)$ storage by keeping only the eigenvectors and eigenvalues, 
 which are all that is needed for the HMC steps. To see this, note that 
 the mass matrix is only needed in the leapfrog integrator (see algorithm), where we take 
-$M^(-1) rho$, where $rho$ is the vector of coordinate-wise momenta. Since
+$M^(-1) rho$, for the momentum vector $rho$. Since
 
 $
-  M^(-1) rho = rho_(bot) + U Lambda^(-1) U^T rho
+  M^(-1) rho = rho - U U^T + U Lambda^(-1) U^T rho
 $
 
-where $rho_(bot) = rho - U U^T rho$, this can be done with only $U$ and $Lambda^(-1)$. 
-To further reduce computational cost, we can ignore eigenvalues that are close to one with 
-a cutoff parameter $c$, returning a truncated tuple $(U_c, Lambda_c)$. And since we first do the 
-element-wise transformation, we store the diagonal components from this as well. The full 
-transformation is
-
-$
-  f = f_(A,mu) compose f_(sigma, mu) = D^(1/2) (Q U_c (Lambda_c - 1) Q U_c^T + I)D^(1/2)
-$
-
-The algorithm is as follows:
+this can be done with only $U$ and $Lambda^(-1)$. And 
+since we first do the element-wise transformation, we store the diagonal components 
+from this as well. The algorithm is as follows:
 
 #algo(
   line-numbers: false,
@@ -331,22 +333,25 @@ The algorithm is as follows:
   title: "low-rank-adapt",
   stroke: none,
   fill: none,
-  parameters: ($D$, $G$, $c$, $gamma$),
+  parameters: ($X$, $S$, $c$, $gamma$),
 )[
-    $U^D <-$ #smallcaps("svd")$(D), U^G <-$ #smallcaps("svd")$(G)$\
-    $S <- \[U^D space U^G\]$ #comment[Combine bases]\
-    $Q, \_\_ <-$ #smallcaps("qr-thin")$(S)$ #comment[Get jointly-spanned orthonormal basis]\
-    $P^D <- Q^T D, P^G <- Q^T G$ #comment[Project draws, grads onto shared subspace]\
+    $X <- (X-dash(X)) dot.circle hat(sigma)_X^(-1) * hat(sigma)_S$ #comment[apply diagonal transform]\
+    $S <- (S-dash(S)) dot.circle hat(sigma)_X^(-1) * hat(sigma)_S$\
     \
-    $C^D <- P^D (P^D)^T + gamma I$ #comment[Get empirical covariance matrices, regularize]\
-    $C^G <- P^D (P^D)^T + gamma I$\
+    $U^X <-$ #smallcaps("svd")$(X), U^S <-$ #smallcaps("svd")$(S)$\
     \
-    $Sigma <-$ #smallcaps("spdm")$(C^D, C^G)$ #comment[Solve $Sigma C^(G) Sigma = C^(D) "for" Sigma$]\
+    $Q, \_\_ <-$ #smallcaps("qr-thin")$([U^X space U^S\])$ #comment[Get jointly-spanned orthonormal basis]\
+    $P^X <- Q^T X, P^S <- Q^T S$ #comment[Project onto shared subspace]\
+    \
+    $C^X <- P^X (P^X)^T + gamma I$ #comment[Get empirical covariances, regularize]\
+    $C^S <- P^S (P^S)^T + gamma I$\
+    \
+    $Sigma <-$ #smallcaps("spdm")$(C^X, C^S)$ #comment[Solve $Sigma C^(S) Sigma = C^(X) "for" Sigma$]\
     \
     $U Lambda U^(-1) <-$ #smallcaps("eigendecompose")$(Sigma)$ #comment[Extract eigenvalues to subset]\
     \
     $U_c <- {U_i: i in {i: lambda_i >= c "or" <= 1/c}}$\
-    $Lambda_c <- {lambda_i: i in {i: lambda_i >= c "or" <= 1/c}}$ #comment[Full matrix $M = Q U_c (Lambda_c - 1) Q U_c^T + I$]\
+    $Lambda_c <- {lambda_i: i in {i: lambda_i >= c "or" <= 1/c}}$ #comment[Full matrix $Sigma = Q U_c (Lambda_c - 1) Q U_c^T + I$]\
     \
     return $Q U_c, Lambda_c$
   ]
@@ -405,7 +410,7 @@ one (80 draws).
   title: "warmup",
   stroke: none,
   fill: none,
-  parameters: ($N$, $N_e$, $N_l$, $nu_e$, $nu_l$)
+  parameters: ($N$, $N_e$, $N_l$, $nu_e: 10$, $nu_l: 80$)
 )[
     $theta_0, alpha_0 med \~ med p(theta)$ #comment[initial draw from prior]\
     $F$ = #smallcaps("MassMatrixEstimator")$()$\
@@ -469,7 +474,7 @@ overhead, but allows evaluating the density on the GPU, which can significantly
 speed up sampling for larger models.
 
 nutpie returns sampling traces as ArviZ datasets, to allow easy posterior analysis
-and convergence checks.
+and convergence checks. Code: #link("https://github.com/pymc-devs/nutpie")
 
 = Experimental evaluation of nutpie
 <numerical-results>
@@ -525,7 +530,7 @@ size per time...
       if $max(II_("U-Turn"),II_("Sub-U-Turn"))=0$:#i\
         $a <- min(a,tilde(a)), b <- max(b,tilde(b))$#d\
       else:#i\
-        break #d #d\
+        #text(weight: "bold")[break] #d #d\
     return $a,b,nabla H$
   ]
 
@@ -545,7 +550,7 @@ size per time...
       if $max(II_("U-Turn"),II_("Sub-U-Turn"))=0$:#i\
         $a <- min(a,tilde(a)), b <- max(b,tilde(b))$#d\
       else:#i\
-        break #d #d\
+        #text(weight: "bold")[break] #d #d\
     return $a,b,nabla H$
   ]
 
@@ -592,26 +597,13 @@ size per time...
     // end‑points
     circle((0,0), radius: 2pt, fill: black, stroke: none)
     circle((2,0), radius: 2pt, fill: black, stroke: none)
-    circle((6,0), radius: 2pt, fill: black, stroke: none)
 
     // solid segment a–b
     line((0,0), (2,0))
-    line((1,-0.25), (1,0.25))
-    line((4,-0.25), (4,0.25))
-
-    // dotted segment b–c
-    line(stroke: (dash: "dotted"), (2,0), (6,0))
-
-    // brace under a–b (opens upward)
-    brace((1,-0.75), (4,-0.75), amplitude: .3, flip: true)
-
-    // brace over b–c (opens downward)
-    brace((2, 0.45), (6, 0.45), amplitude: .3)
 
     // ── labels ─────────────────────────────────────────────────
     content((0,-0.25), [$a$], anchor: "north")
     content((2,-0.25), [$b$], anchor: "north")
-    content((6,-0.25), [$tilde(b)$], anchor: "north")
 
 
     circle((0,-2), radius: 2pt, fill: black, stroke: none)
@@ -628,8 +620,9 @@ size per time...
 
     // brace under a–b (opens upward)
     brace((1,-2.75), (4,-2.75), amplitude: .3, flip: true)
-  
-    content((0,-2.25), [$tilde(a)$], anchor: "north")
+    brace((2,-1.75), (6,-1.75), amplitude: .3)
+
+    content((0,-2.25), [$a=tilde(a)$], anchor: "north")
     content((2,-2.25), [$b$], anchor: "north")
     content((6,-2.25), [$tilde(b)$], anchor: "north")
 
@@ -715,5 +708,3 @@ $
   = tilde(G) G^T + Sigma^(-1) tilde(X) bold(1) dash(alpha)^T - Sigma^(-1) tilde(X) tilde(X)^T Sigma^(-1) \
   = tilde(G) tilde(G)^T - Sigma^(-1) tilde(X) tilde(X)^T Sigma^(-1)
 $
-
-Code: #link("https://github.com/pymc-devs/nutpie")
