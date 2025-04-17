@@ -6,3 +6,4 @@ main.out
 .ipynb_checkpoints*
 fonts
 .vscode
+paper-writing.code-workspace

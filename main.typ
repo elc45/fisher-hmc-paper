@@ -1,6 +1,7 @@
 #import "@preview/arkheion:0.1.0": arkheion, arkheion-appendices
 
 #import "@preview/algo:0.3.6": algo, i, d, comment, code
+#import "@preview/cetz:0.3.4"  // load CeTZ
 
 #show: set text(size: 12pt)
 
@@ -235,12 +236,12 @@ We focus on three families of affine diffeomorphisms $F$, for which derive speci
 === Diagonal mass matrix
 <diagonal-mass-matrix>
 
-If we choose $F_(sigma , mu) : Y arrow X$ as $x arrow.bar y dot.circle sigma +
+If we choose $f_(sigma , mu) : Y arrow X$ as $x arrow.bar y dot.circle sigma +
 mu$, we are effectively doing diagonal mass matrix estimation. In this case, 
 the sample Fisher divergence reduces to
 
 $
-  hat(F)_(sigma , mu)(f^*Y, N(0,I_d)) = 1 / N sum_i norm(sigma dot.circle alpha_i
+  hat(cal(F))_(sigma , mu)(f^*Y, N(0,I_d)) = 1 / N sum_i norm(sigma dot.circle alpha_i
   + sigma^(-1) dot.circle (x_i - mu))^2
 $
 
@@ -257,8 +258,8 @@ the diagonal equal to $var(x_i)^(1/2)var(alpha_i)^(-1/2)$.
 <some-theoretical-results-for-normal-posteriors>
 
 If the posterior is $N (mu , Sigma)$, then the minimizers $mu^*$ and
-$sigma^*$ of $hat(cal(F))$ converge to $mu$ and $exp (1/2 log diag(Sigma) -
-1/2 log diag(Sigma^(- 1)))$, respectively. This is a direct consequence of
+$sigma^*$ of $hat(cal(F))$ derived above converge to $mu$ and $exp (1/2 log diag(Sigma) -
+1/2 log diag(Sigma^(- 1)))$, respectively. This is a direct consequence of the fact that 
 $cov(x_i) arrow Sigma$ and $cov(alpha_i) arrow Sigma^(-1)$.
 
 $hat(cal(F))$ converges to $sum_i lambda_i + lambda_i^(- 1)$, where $lambda_i$
@@ -293,17 +294,36 @@ $cov(s_i)$.
 
 === Diagonal plus low-rank
 
-We can also approximate the full mass matrix with a "diagonal plus low-rank" matrix, 
-in high dimensional settings to save computation or if the number of dimensions is 
-larger than the number of available draws. We must regularize so that the draws and scores 
-share a common scale, otherwise the two sources of information might have 
-dramatically different weights in the calculation of $Sigma$. And to avoid 
-$O (n^3)$ computation costs, we can project draws and scores into the span 
-of $x_i$ and $alpha_i$ and compute the regularized mean in this subspace. 
-We can also avoid $O (n^2)$ storage, and still do all operations we need for 
-HMC, if we only store the eigenvectors and eigenvalues. To further reduce 
-computational cost, we can ignore eigenvalues that are close to one with a 
-cutoff parameter $c$. The algorithm is as follows:
+Either to save computation in high dimensional settings, or if the number of dimensions is 
+larger than the number of available draws at the time of adaptation, we can also approximate 
+the full mass matrix with a "diagonal plus low-rank" matrix. We can view this as the 
+composition of two affine transformations, the first one being the element-wise (diagonal) affine 
+transformation defined earlier, and the second a low-rank approximation to the geometric 
+mean of the draw and gradient empirical covariance matrices. For this approximation we regularize so that the draws 
+and scores share a common scale, otherwise the two sources of information might have 
+dramatically different weights in the calculation of $Sigma$. 
+We project draws and scores into the joint span 
+of $x_i$ and $alpha_i$ and compute the mean in this subspace. 
+We can also avoid $O (n^2)$ storage by only storing the eigenvectors and eigenvalues, 
+which are all that is needed for the HMC steps. To see this, note that 
+the mass matrix is only needed in the leapfrog integrator (see algorithm), where we take 
+$M^(-1) rho$, where $rho$ is the vector of coordinate-wise momenta. Since
+
+$
+  M^(-1) rho = rho_(bot) + U Lambda^(-1) U^T rho
+$
+
+where $rho_(bot) = rho - U U^T rho$, this can be done with only $U$ and $Lambda^(-1)$. 
+To further reduce computational cost, we can ignore eigenvalues that are close to one with 
+a cutoff parameter $c$, returning a truncated tuple $(U_c, Lambda_c)$. And since we first do the 
+element-wise transformation, we store the diagonal components from this as well. The full 
+transformation is
+
+$
+  f = f_(A,mu) compose f_(sigma, mu) = D^(1/2) (Q U_c (Lambda_c - 1) Q U_c^T + I)D^(1/2)
+$
+
+The algorithm is as follows:
 
 #algo(
   line-numbers: false,
@@ -326,27 +346,21 @@ cutoff parameter $c$. The algorithm is as follows:
     $U Lambda U^(-1) <-$ #smallcaps("eigendecompose")$(Sigma)$ #comment[Extract eigenvalues to subset]\
     \
     $U_c <- {U_i: i in {i: lambda_i >= c "or" <= 1/c}}$\
-    $Lambda_c <- {lambda_i: i in {i: lambda_i >= c "or" <= 1/c}}$\
+    $Lambda_c <- {lambda_i: i in {i: lambda_i >= c "or" <= 1/c}}$ #comment[Full matrix $M = Q U_c (Lambda_c - 1) Q U_c^T + I$]\
     \
-    $M <- Q U_c (Lambda_c - 1) U_c^T + I$\
-    return $M$
+    return $Q U_c, Lambda_c$
   ]
-
-By subtracting the identity matrix from the diagonal matrix of eigenvalues, we obtain a 
-matrix whose eigenvalues include all those of $Sigma$ which are sufficiently far 
-from 1, with the remaining eigenvalues equal to 1. This is then a
-"diagonal plus low-rank" matrix.
 
 = Adaptation Schema
 <adaptation-tuning-warmup-of-mass-matrix>
 
 Whether we adapt a mass matrix using the posterior variance as Stan does, or if
 we use a bijection based on the Fisher divergence, we
-always have the same problem: in order to generate suitable posterior draws we need a good mass 
+inevitably have the same problem: in order to generate suitable posterior draws, we need a good mass 
 matrix (or bijection), but to estimate a good mass-matrix, we
-need posterior draws. There is a well known way out of this "chicken and egg" conundrum: 
-we start sampling with an initial transformation, and collect a number of draws. 
-Based on those draws, we estimate a better transformation, and repeat. This adaptation-window approach
+need posterior draws. There is a well-known way out of this "chicken and egg" conundrum: 
+we start sampling with an initial transformation, and collect a number of draws; based 
+on those draws, we estimate a better transformation, and repeat. This adaptation-window approach
 has long been used in the major implementations of HMC, and has remained largely
 unchanged for a number of years. PyMC, Numpyro, and Blackjax all use the
 same details as Stan, with at most minor modifications. There are, however, a couple of 
@@ -355,22 +369,21 @@ small changes that improve the efficiency of this schema significantly.
 == Choice of initial diffeomorphism
 <choice-of-initial-mass-matrix>
 
-Stan's sampler begins its first adaptation using an identity mass matrix. The very first
-HMC trajectories seem to be overall much more reasonable if we use
-$M=diag(alpha_0^T alpha_0)$ instead. This also makes the initialization
-independent of variable scaling.
+Stan's HMC sampler begins warmup using an identity mass matrix. We instead initialize with 
+$M=diag(alpha_0^T alpha_0)$, which in expectation is equal to the Fisher information. This 
+also makes the initialization independent of variable scaling.
 
 == Accelerated Window-Based Adaptation
 <accelerated-window-based-adaptation-warmuptuning-scheme>
 
-Stan and other samplers do not run vanilla HMC, but usually variants, most notably the 
+Most widely used HMC implementations do not run vanilla HMC, but variants, most notably the 
 No-U-Turn Sampler (NUTS) #cite(<hoffman_nuts_2011>), where 
-the length of the Hamiltonian trajectory is chosen dynamically. This can make it very costly to
-generate draws if the mass matrix is not well adapted, because in those cases we
-often use a large number of HMC steps for each draw (typically up to 1000). Thus 
-very early on during sampling, we have a large incentive to use
+the length of the Hamiltonian trajectory is chosen dynamically. Such schemas can make 
+it extremely costly to generate draws with a poor mass matrix, because in these cases the 
+algorithm can take a huge number of HMC steps for each draw (typically up to 1000). Thus 
+very early on during sampling, we have a big incentive to use
 available information about the posterior as quickly as possible, to avoid these
-long trajectories. By default, Stan starts adaptation with a step-size adaptation
+scenarios. By default, Stan starts adaptation with a step-size adaptation
 window of 75 draws, where the mass matrix is untouched. This is followed by a mass 
 matrix adaptation window consisting of a series of "memoryless" intervals of 
 increasing length, the first of which (25 draws) still uses the initial mass matrix for sampling. 
@@ -382,15 +395,64 @@ previous $k$ draws. However, this is computationally inefficient (unless the log
 is very expensive), and is not easily implemented as a streaming estimator
 \(see below for more details). Using several overlapping estimation
 windows, though, we can compromise between optimal information usage and computational
-cost, while still using streaming estimators.
+cost, while still using streaming estimators. We split the warmup into two adaptation regimes, 
+the first with a very quick update frequency (10 draws) and the second with a much longer 
+one (80 draws).
+
+#algo(
+  line-numbers: false,
+  block-align: none,
+  title: "warmup",
+  stroke: none,
+  fill: none,
+  parameters: ($N$, $N_e$, $N_l$, $nu_e$, $nu_l$)
+)[
+    $theta_0, alpha_0 med \~ med p(theta)$ #comment[initial draw from prior]\
+    $F$ = #smallcaps("MassMatrixEstimator")$()$\
+    $F$ = #smallcaps("update")$(F, theta_0, alpha_0)$\
+    $B$ = #smallcaps("MassMatrixEstimator")$()$\
+    step_size_estimator = #smallcaps("StepSizeAdapt")$(theta_0, alpha_0)$\
+    first_mass_matrix = 1\
+    \
+    for $i$ in 1 to $N$:#i\
+      
+      $e = i < N_e$ #comment[indicator for early regime]\
+      $l = N - i < N_l$ #comment[indicator for late regime]\
+      $M <- F$\
+      $theta, rho$ = #smallcaps("hmc_step")$(M, epsilon, theta, alpha)$ #comment[simulate Hamiltonian]\
+      \
+      if $(1-e) or ("steps_from_init" > 4)$:#i\
+      $F$ = #smallcaps("update")$(F, theta, alpha)$\
+      $B$ = #smallcaps("update")$(B, theta, alpha)$#d\
+      if $l$:#i\
+      step_size = step_size_estimator.current_warmup()\
+      continue #d\
+      $nu <- nu_e$ if $e$ else $nu_l$ \
+      $r <- N - i - N_l$\
+      if $r > nu_l$ and #smallcaps("NumPoints")$(B) > nu$:#i\
+        $F <- G$\
+        $B <-$ #smallcaps("MassMatrixEstimator")$()$\
+        if first mass matrix:#i\
+          step_size_estimator.reset()\
+          first_mass_matrix = 0 #d #d\
+    return
+  ]
+
+#algo(
+  line-numbers: false,
+  block-align: none,
+  title: "Update",
+  stroke: none,
+  fill: none,
+  parameters: ($hat(sigma)^2_(n-1)$, $x_(n-1)$, $x_n$),
+ )[
+    $dash(x)_n <- dash(x)_(n-1) + 1/n (x_n - dash(x)_(n-1))$\
+    $hat(sigma)^2_n <- (1/(n-1)) hat(sigma)^2_(n-1) + (x_n - dash(x)_(n-1))^2$\
+    return $sigma^2$
+  ]
+
 
 = Implementation in nutpie
-
-nutpie implements:
-- New adaptation schema
-- Diagonal mass matrix adaptation based on the Fisher divergence
-- Low rank mass matrix adaptation as described here
-- Explicit transformation with normalizing flows
 
 The core algorithms are implemented in rust, which all array operations
 abstracted away, to allow users of the rust API to provide GPU implementations.
@@ -400,13 +462,13 @@ It can take PyMC or Stan models.
 Stan is used through bridgestan, which compiles C libraries that nutpie can load
 dynamically to call the logp function gradient with little overhead.
 
-pymc models can be sampled either through the numba backend of pymc, which
+PyMC models can be sampled either through the numba backend, which
 also allows evaluating the density and its gradient with little overhead.
-Alternatively, it can use the pymc jax backend. This incures a higher per-call
+Alternatively, it can use the pymc jax backend. This incurs a higher per-call
 overhead, but allows evaluating the density on the GPU, which can significantly
 speed up sampling for larger models.
 
-nutpie returns sampling traces as arviz datasets, to allow easy posterior analysis
+nutpie returns sampling traces as ArviZ datasets, to allow easy posterior analysis
 and convergence checks.
 
 = Experimental evaluation of nutpie
@@ -422,13 +484,13 @@ size per time...
   title: "leapfrog",
   stroke: none,
   fill: none,
-  parameters: ($theta$, $rho$, $L$, $h$),
+  parameters: ($theta$, $rho$, $L$, $epsilon$, $M$),
  )[
     $theta^(0) <- theta, rho^(0) <- rho$\
     for $i "from" 0 "to" L$:#i\
-      $rho^((i+1/2)) <- rho^((i))- h/2 nabla U(theta^((i)))$ #comment[half-step momentum]\
-      $theta^((i+1)) <- theta^((i)) + h rho^((i + 1/2))$ #comment[full-step position]\
-      $rho^((i+1)) <- rho^((i+ 1/2))- h/2 nabla U(theta^((i+1)))$ #comment[half-step momentum]#d\
+      $rho^((i+1/2)) <- rho^((i))- epsilon/2 nabla U(theta^((i)))$ #comment[half-step momentum]\
+      $theta^((i+1)) <- theta^((i)) + epsilon M^(-1) rho^((i + 1/2))$ #comment[full-step position]\
+      $rho^((i+1)) <- rho^((i+ 1/2))- epsilon/2 nabla U(theta^((i+1)))$ #comment[half-step momentum]#d\
     return $(theta^((L)),rho^((L)))$
   ]
 
@@ -457,9 +519,9 @@ size per time...
  )[
     $a,b <- 0$\
     for $i$ from 0 to len($B$):#i\
-      $tilde(a) <- a + (-1)^(B_i)2^(i-1), tilde(b) <- b + (-1)^(B_i)2^(i-1)$\
-      $II_("U-Turn") <-$ #smallcaps("U-Turn") $(a,b,theta,rho,epsilon)$\
-      $II_("Sub-U-Turn") <-$ #smallcaps("Sub-U-Turn") $(tilde(a), tilde(b), theta, rho, epsilon)$\
+      $tilde(a) <- a + (-1)^(B_i)2^(i-1), tilde(b) <- b + (-1)^(B_i)2^(i-1)$ #comment[tree doubling]\
+      $II_("U-Turn") <-$ #smallcaps("u-turn") $(a,b,theta,rho,epsilon)$\
+      $II_("Sub-U-Turn") <-$ #smallcaps("sub-u-turn") $(tilde(a), tilde(b), theta, rho, epsilon)$\
       if $max(II_("U-Turn"),II_("Sub-U-Turn"))=0$:#i\
         $a <- min(a,tilde(a)), b <- max(b,tilde(b))$#d\
       else:#i\
@@ -478,8 +540,8 @@ size per time...
     $a,b <- 0$\
     for $i$ from 0 to len($B$):#i\
       $tilde(a) <- a + (-1)^(B_i)2^(i-1), tilde(b) <- b + (-1)^(B_i)2^(i-1)$\
-      $II_("U-Turn") <-$ #smallcaps("U-Turn") $(a,b,theta,rho,epsilon)$\
-      $II_("Sub-U-Turn") <-$ #smallcaps("Sub-U-Turn") $(tilde(a), tilde(b), theta, rho, epsilon)$\
+      $II_("U-Turn") <-$ #smallcaps("u-turn") $(a,b,theta,rho,epsilon)$\
+      $II_("Sub-U-Turn") <-$ #smallcaps("sub-u-turn") $(tilde(a), tilde(b), theta, rho, epsilon)$\
       if $max(II_("U-Turn"),II_("Sub-U-Turn"))=0$:#i\
         $a <- min(a,tilde(a)), b <- max(b,tilde(b))$#d\
       else:#i\
@@ -487,6 +549,93 @@ size per time...
     return $a,b,nabla H$
   ]
 
+#algo(
+  line-numbers: false,
+  block-align: none,
+  title: "u-turn",
+  stroke: none,
+  fill: none,
+  parameters: ($theta$, $rho$, $a$, $b$, $epsilon$),
+ )[
+    $theta^(-), rho^(-), H^(+), H^(-) <-$ #smallcaps("leapfrog")$(theta, rho, epsilon alpha, epsilon)$\
+    $theta^(+), rho^(+), tilde(H)^(+), tilde(H)^(-) <-$ #smallcaps("leapfrog")$(theta, rho, epsilon beta, epsilon)$\
+    $H^(+) = max(tilde(H)^(+), H^(+)), H^(-) = min(tilde(H)^(-), H^(-))$\
+    $II_("U-Turn") = rho^(+) dot (theta^(+) - theta^(-)) < 0$ or $rho^(-) dot (theta^(+) - theta^(-)) < 0$\
+    return $II_("U-Turn"), H^(+), H^(-)$
+  ]
+
+#algo(
+  line-numbers: false,
+  block-align: none,
+  title: "sub-u-turn",
+  stroke: none,
+  fill: none,
+  parameters: ($theta$, $rho$, $a$, $b$, $epsilon$),
+ )[
+    if $a=b$:#i\
+      return 0 #d\
+    $m <- floor((a+b) / 2)$\
+    $"full"$ = #smallcaps("u-turn")$(a,b,theta,rho,epsilon)$\
+    $"left"$ = #smallcaps("sub-u-turn")$(a,m,theta,rho,epsilon)$\
+    $"right"$ = #smallcaps("sub-u-turn")$(m+1,b,theta,rho,epsilon)$\
+    return $max("left","right","full")$
+  ]
+
+#figure(
+  // CeTZ drawing canvas
+  cetz.canvas({
+    // pull in the drawing primitives & the brace decoration
+    import cetz.draw: *
+    import cetz.decorations: brace
+
+    // ── geometry ───────────────────────────────────────────────
+    // end‑points
+    circle((0,0), radius: 2pt, fill: black, stroke: none)
+    circle((2,0), radius: 2pt, fill: black, stroke: none)
+    circle((6,0), radius: 2pt, fill: black, stroke: none)
+
+    // solid segment a–b
+    line((0,0), (2,0))
+    line((1,-0.25), (1,0.25))
+    line((4,-0.25), (4,0.25))
+
+    // dotted segment b–c
+    line(stroke: (dash: "dotted"), (2,0), (6,0))
+
+    // brace under a–b (opens upward)
+    brace((1,-0.75), (4,-0.75), amplitude: .3, flip: true)
+
+    // brace over b–c (opens downward)
+    brace((2, 0.45), (6, 0.45), amplitude: .3)
+
+    // ── labels ─────────────────────────────────────────────────
+    content((0,-0.25), [$a$], anchor: "north")
+    content((2,-0.25), [$b$], anchor: "north")
+    content((6,-0.25), [$tilde(b)$], anchor: "north")
+
+
+    circle((0,-2), radius: 2pt, fill: black, stroke: none)
+    circle((2,-2), radius: 2pt, fill: black, stroke: none)
+    circle((6,-2), radius: 2pt, fill: black, stroke: none)
+
+    // solid segment a–b
+    line((0,-2), (2,-2))
+
+    // dotted segment b–c
+    line(stroke: (dash: "dotted"), (2,-2), (6,-2))
+    line((1,-2.25), (1,-1.75))
+    line((4,-2.25), (4,-1.75))
+
+    // brace under a–b (opens upward)
+    brace((1,-2.75), (4,-2.75), amplitude: .3, flip: true)
+  
+    content((0,-2.25), [$tilde(a)$], anchor: "north")
+    content((2,-2.25), [$b$], anchor: "north")
+    content((6,-2.25), [$tilde(b)$], anchor: "north")
+
+  }),
+  caption: [Modified NUTS orbit checks]
+)
 
 #pagebreak()
 #bibliography("FisherHMCPaper.bib", style: "ieee")
