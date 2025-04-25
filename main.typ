@@ -178,8 +178,9 @@ If $f$ is an affine transformation, this simplifies to mass matrix-based
 HMC, wherein choosing $f(x) = Sigma^(1/2)x + mu$ corresponds to the
 mass matrix $Sigma^(-1)$, as described in more detail in @neal_mcmc_2012. In the present work,
 we restrict ourselves to the subset of affine diffeomorphisms, meaning that the transformations 
-we derive are implemented in HMC in the same way as previous mass matrix adaptative HMC schemas, 
-in the leapfrog integrator.
+we derive are implementable in HMC in the standard method with the leapfrog integrator 
+per the algorithm (ref default leapfrog algo). However, implementing these as normalizing 
+flows is slightly different, as shown in the modified leapfrog algorithm (ref).
 
 HMC efficiency is notoriously dependent on the parametrization, so it is to be expected that
 transformed HMC be much more efficient for some choices of $f$ than
@@ -237,7 +238,7 @@ We focus on three families of affine diffeomorphisms $F$, for which derive speci
 <diagonal-mass-matrix>
 
 If we choose $f_(sigma , mu) : Y arrow X$ as $x arrow.bar y dot.circle sigma +
-mu$, we are effectively doing diagonal mass matrix estimation. In this case, 
+mu$, we are doing diagonal mass matrix estimation. In this case, 
 the sample Fisher divergence reduces to
 
 $
@@ -245,29 +246,23 @@ $
   + sigma^(-1) dot.circle (x_i - mu))^2
 $
 
-This is a special case of the affine transformation in
-#ref(<appendix-proof-affine>) and minimal if $sigma^2 = var(x_i)^(1/2)
-var(alpha_i)^(-1/2)$ and $mu = dash(x)_i + sigma^2 dash(s)_i$; the
-same result from the solvable case in #ref(<motivation-gaussian>). This solution is very 
-computationally inexpensive, and is hence the default in nutpie. Using Welford's algorithm 
+This is a special case of affine transformation and minimal when $sigma = var(x_i)^(1/2)
+var(alpha_i)^(-1/2)$ and $mu = dash(x)_i + sigma^2 dash(s)_i$, corresponding to 
+the result in #ref(<motivation-gaussian>). This solution is very computationally 
+inexpensive, and is hence the default in nutpie. Using Welford's algorithm 
 to keep online estimates of the draw and score variances during sampling (thereby avoiding the 
-need to explicity store scores), the mass matrix is set to a diagonal matrix with the $i$'th entry on 
-the diagonal equal to $var(x_i)^(1/2)var(alpha_i)^(-1/2)$.
+need to explicity store scores), the mass matrix is set to a diagonal matrix with 
+the $i$'th entry on the diagonal equal to $var(x_i)^(1/2)var(alpha_i)^(-1/2)$.
 
-==== Some theoretical results for normal posteriors
-<some-theoretical-results-for-normal-posteriors>
-
-If the posterior is $N (mu , Sigma)$, then the minimizers $mu^*$ and
+If our target density is $N(mu , Sigma)$, then the minimizers $mu^*$ and
 $sigma^*$ of $hat(cal(F))$ derived above converge to $mu$ and $exp (1/2 log diag(Sigma) -
 1/2 log diag(Sigma^(- 1)))$, respectively. This is a direct consequence of the fact that 
-$cov(x_i) arrow Sigma$ and $cov(alpha_i) arrow Sigma^(-1)$.
-
-$hat(cal(F))$ converges to $sum_i lambda_i + lambda_i^(- 1)$, where $lambda_i$
+$cov(x_i) arrow Sigma$ and $cov(alpha_i) arrow Sigma^(-1)$. The divergence $hat(cal(F))$ converges to $sum_i lambda_i + lambda_i^(- 1)$, where $lambda_i$
 are the generalized eigenvalues of $Sigma$ with respect to $diag(hat(sigma)^2)$,
 so large and small eigenvalues are penalized. When we choose $diag(Sigma)$ as
 mass matrix, we effectively minimize $sum_i lambda_i$, and only penalize large
-eigenvalues. If we choose $diag(bb(E) (alpha alpha^T))$ (as proposed, for
-instance, in #cite(<tran_tuning_2024>, form: "prose")) we effectively minimize
+eigenvalues. If we choose $diag(bb(E) (alpha alpha^T))$, as proposed, for
+instance, in #cite(<tran_tuning_2024>, form: "prose"), we effectively minimize
 $sum lambda_i^(- 1)$ and only penalize small eigenvalues. But based on
 theoretical results for multivarite normal posteriors in
 #cite(<langmore_condition_2020>, form: "prose"), we know that both large and
@@ -280,15 +275,17 @@ as seen by the sampler in the transformed space.
 
 === Full mass matrix
 <full-mass-matrix>
-We choose $f_(A , mu) (y) = A y + mu$. This corresponds to a mass matrix $M = (A
-A^T)^(- 1)$. Because as we will see $hat(cal(F))$ only depends on $A A^T$ and $mu$,
-we can restrict $A$ to be symmetric positive definite. We get 
+The full affine diffeomorphism $f_(A , mu) (y) = A y + mu$ corresponds to a mass matrix 
+$M = (A A^T )^(-1)$. The Fisher divergence in this case is
+
 $ 
   hat(cal(F)) [f] = 1/N sum norm(A^T s_i + A^(-1) (x_i - mu))^2
 $
+
 which is minimized when $A A^T cov(x_i) A A^T = cov(alpha_i)$ (proof in 
-#ref(<appendix-proof-affine>)), and as such corresponds again to our earlier
-derivation in #ref(<motivation-gaussian>). If the two covariance matrices are
+#ref(<appendix-proof-affine>)), corresponding again to the derivation in 
+#ref(<motivation-gaussian>). Because $hat(cal(F))$ only depends on $A A^T$ and $mu$,
+we can restrict $A$ to be symmetric positive definite. If the two covariance matrices are
 full rank, we get a unique minimum at the geometric mean of $cov(x_i)$ and
 $cov(s_i)$.
 
@@ -302,15 +299,15 @@ returning a truncated set of eigenvectors $U_c$ and corresponding eigenvalues $L
 In fact, we implement this as the composition of two affine transformations, the first one being the element-wise (diagonal) affine 
 transformation defined earlier, and the second a low-rank approximation to the geometric 
 mean of the draw and gradient empirical covariance matrices. The corresponding 
-normalizing flow is $f = f_(A,mu) compose f_(sigma, mu)$. Note that when we apply this 
-transformation via $M$, though, it occurs as
+normalizing flow is $f = f_(A,mu) compose f_(sigma, mu)$, and the mass matrix
 
 $
-  M = D^(1/2) (Q U_c (Lambda_c - 1) Q U_c^T + I)D^(1/2)
+  Sigma = D^(1/2) (Q U_c (Lambda_c - 1) Q U_c^T + I)D^(1/2)
 $ 
 
 where $Q$ is an orthonormal basis for the shared subspace, which we'd like to optimize over $(D, U, Lambda)$. To do this, we do a greedy optimization 
-where we first apply the optimal element-wise rescaling factor $sqrt(x_i / alpha_i)$, "pulling back" $mu$ to 
+where we first apply the optimal element-wise rescaling factor $var(x_i)^(1/2)
+var(alpha_i)^(-1/2)$, "pulling back" $mu$ to 
 an intermediate space, from which we then optimize a low-rank transformation to the final 
 transformed posterior. For this second leg of optimization, we project $x_i$ and $alpha_i$ into 
 their joint span, compute the geometric mean in this subspace as in #ref(<full-mass-matrix>), and 
@@ -416,8 +413,8 @@ one (80 draws).
     $F$ = #smallcaps("MassMatrixEstimator")$()$\
     $F$ = #smallcaps("update")$(F, theta_0, alpha_0)$\
     $B$ = #smallcaps("MassMatrixEstimator")$()$\
-    step_size_estimator = #smallcaps("StepSizeAdapt")$(theta_0, alpha_0)$\
-    first_mass_matrix = 1\
+    ss_estimator = #smallcaps("StepSizeAdapt")$(theta_0, alpha_0)$\
+    $II_"init" <- 1$ #comment[indicator for initial mass matrix]\
     \
     for $i$ in 1 to $N$:#i\
       
@@ -430,16 +427,16 @@ one (80 draws).
       $F$ = #smallcaps("update")$(F, theta, alpha)$\
       $B$ = #smallcaps("update")$(B, theta, alpha)$#d\
       if $l$:#i\
-      step_size = step_size_estimator.current_warmup()\
+      step_size = ss_estimator.current_warmup()\
       continue #d\
       $nu <- nu_e$ if $e$ else $nu_l$ \
       $r <- N - i - N_l$\
       if $r > nu_l$ and #smallcaps("NumPoints")$(B) > nu$:#i\
         $F <- G$\
         $B <-$ #smallcaps("MassMatrixEstimator")$()$\
-        if first mass matrix:#i\
-          step_size_estimator.reset()\
-          first_mass_matrix = 0 #d #d\
+        if $II_"init"$:#i\
+          ss_estimator.reset()\
+          $II_"init" <- 0$ #d #d\
     return
   ]
 
@@ -494,8 +491,28 @@ size per time...
     $theta^(0) <- theta, rho^(0) <- rho$\
     for $i "from" 0 "to" L$:#i\
       $rho^((i+1/2)) <- rho^((i))- epsilon/2 nabla U(theta^((i)))$ #comment[half-step momentum]\
-      $theta^((i+1)) <- theta^((i)) + epsilon M^(-1) rho^((i + 1/2))$ #comment[full-step position]\
+      $theta^((i+1)) <- theta^((i)) + epsilon Sigma^(-1) rho^((i + 1/2))$ #comment[full-step position]\
       $rho^((i+1)) <- rho^((i+ 1/2))- epsilon/2 nabla U(theta^((i+1)))$ #comment[half-step momentum]#d\
+    return $(theta^((L)),rho^((L)))$
+  ]
+
+#algo(
+  line-numbers: false,
+  block-align: none,
+  title: "nutpie-leapfrog",
+  stroke: none,
+  fill: none,
+  parameters: ($theta$, $rho$, $L$, $epsilon$, $f$),
+ )[
+    $y = f^*(theta^0), nabla U = nabla f^*(theta^0)$ #comment[pull back $theta$ to $N$]\
+    for $i "from" 0 "to" L$:#i\
+      $rho^((i+1/2)) <- rho^((i))- epsilon/2 nabla U$ #comment[half-step momentum]\
+      $y <- y + epsilon I rho^((i + 1/2))$ #comment[full-step position ($Sigma=I$)]\
+      \
+      $theta = f(y)$ #comment[push-forward $y$ to $M$]\
+      $y = f^*(theta^0), nabla U = nabla f^*(theta^0)$ #comment[evaluate density]\
+      \
+      $rho^((i+1)) <- rho^((i+ 1/2))- epsilon/2 nabla U$ #comment[half-step momentum]#d\
     return $(theta^((L)),rho^((L)))$
   ]
 
