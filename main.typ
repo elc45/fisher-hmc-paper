@@ -17,7 +17,18 @@
       orcid: "0000-0002-4239-4541",
       affiliation: "PyMC Labs",
     ),
+    (
+      name: "Eliot Carlson",
+      email: "eliot.carlson@pymc-labs.com",
+      affiliation: "PyMC Labs",
+    ),
+    (
+      name: "Bob Carpenter",
+      email: "bcarpenter@flatironinstitute.org",
+      affiliation: "Flatiron Institute",
+    ),  
   ),
+  
   abstract: [
     Hamiltonian Monte Carlo (HMC) is a powerful tool for Bayesian inference, as
     it can explore complex and high-dimensional parameter spaces. But HMC's
@@ -77,7 +88,8 @@ Hamiltonian Monte Carlo (HMC) is a powerful Markov Chain Monte Carlo (MCMC)
 method widely used in Bayesian inference for sampling from complex posterior
 distributions. HMC can explore high-dimensional parameter spaces more
 efficiently than traditional MCMC techniques, which makes it popular in
-probabilistic programming libraries like Stan #cite(<carpenter_stan_2017>) and PyMC. However, the performance
+probabilistic programming libraries like Stan #cite(<carpenter_stan_2017>) and 
+PyMC #cite(<pymc_2015>). However, the performance
 of HMC depends critically on the parameterization of the posterior space. Modern
 samplers automate a part of these reparametrizations by adapting a "mass matrix"
 in the warmup phase of sampling. A common approach in HMC is to estimate a mass 
@@ -170,17 +182,58 @@ if our posterior $mu$ is defined on a space $M$, we try to find a
 diffeomorphism $f: N arrow M$ such that the transformed posterior $f^*mu$ is well-behaved with respect to some property. 
 Note that we define the transformation as a function
 #emph[from] the transformed space #emph[to] the original posterior, in keeping
-consistent with the Normalizing Flow literature. Since the transformation is a
-bijection, we can choose any direction we want, as long as we stay consistent
-with our choice. $f^* mu$ refers to the pullback of the posterior (which we can interpret as a volume
-form), i.e. we #emph[pull it back] to the space $N$ along the transformation $f$. 
-If $f$ is an affine transformation, this simplifies to mass matrix-based 
+consistent with the Normalizing Flow literature.#footnote[Since the transformation 
+is a bijection, we can choose any direction we want, as long as we stay consistent
+with our choice.] $f^* mu$ refers to the pullback of the posterior (which we can 
+interpret as a volume form), i.e. we #emph[pull it back] to the space $N$ along the 
+transformation $f$. If $f$ is an affine transformation, this simplifies to mass matrix-based 
 HMC, wherein choosing $f(x) = Sigma^(1/2)x + mu$ corresponds to the
-mass matrix $Sigma^(-1)$, as described in more detail in @neal_mcmc_2012. In the present work,
-we restrict ourselves to the subset of affine diffeomorphisms, meaning that the transformations 
-we derive are implementable in HMC in the standard method with the leapfrog integrator 
-per the algorithm (ref default leapfrog algo). However, implementing these as normalizing 
-flows is slightly different, as shown in the modified leapfrog algorithm (ref).
+mass matrix $Sigma^(-1)$, as described in more detail in #cite(<neal_mcmc_2012>, form: "prose"). In 
+standard implementations, $Sigma^(-1)$ appears in full in the leapfrog 
+integrator:
+
+#algo(
+  line-numbers: false,
+  block-align: none,
+  title: "leapfrog",
+  stroke: none,
+  fill: none,
+  parameters: ($theta$, $rho$, $L$, $epsilon$, $Sigma$),
+ )[
+    $theta^(0) <- theta, rho^(0) <- rho$\
+    for $i "from" 0 "to" L$:#i\
+      $rho^((i+1/2)) <- rho^((i))- epsilon/2 nabla U(theta^((i)))$ #comment[half-step momentum]\
+      $theta^((i+1)) <- theta^((i)) + epsilon Sigma^(-1) rho^((i + 1/2))$ #comment[full-step position]\
+      $rho^((i+1)) <- rho^((i+ 1/2))- epsilon/2 nabla U(theta^((i+1)))$ #comment[half-step momentum]#d\
+    return $(theta^((L)),rho^((L)))$
+  ]
+
+Implemented as a normalizing flow, however, the draws are pulled back along $f$ to 
+a more forgiving space where the Hamiltonian is simulated, using an identity mass 
+matrix:
+
+#algo(
+  line-numbers: false,
+  block-align: none,
+  title: "nf-leapfrog",
+  stroke: none,
+  fill: none,
+  parameters: ($theta$, $rho$, $L$, $epsilon$, $f$),
+ )[
+    $theta^(0) <- theta, rho^(0) <- rho$\
+    $y = f^*(theta^0), nabla U = nabla f^*(theta^0)$ #comment[pull back $theta$ to $N$]\
+    for $i "from" 0 "to" L$:#i\
+      $rho^((i+1/2)) <- rho^((i))- epsilon/2 nabla U$ #comment[half-step momentum]\
+      $y <- y + epsilon I rho^((i + 1/2))$ #comment[full-step position ($Sigma=I$)]\
+      \
+      $theta^((i)) = f(y)$ #comment[push-forward $y$ to $M$]\
+      $y = f^*(theta^((i))), nabla U = nabla f^*(theta^((i)))$ #comment[evaluate density]\
+      \
+      $rho^((i+1)) <- rho^((i+ 1/2))- epsilon/2 nabla U$ #comment[half-step momentum]#d\
+    return $(theta^((L)),rho^((L)))$
+  ]
+
+== Fisher Divergence
 
 HMC efficiency is notoriously dependent on the parametrization, so it is to be expected that
 transformed HMC be much more efficient for some choices of $f$ than
@@ -201,33 +254,27 @@ terms of an inner product, we already have a well-defined norm on the scores
 that allows us to evaluate their difference. This directly motivates the
 following definition of the Fisher divergence.
 
-== Fisher divergence
-
 Let $(N, g)$ be a Riemannian manifold with probability volume forms $omega_1$
-and $omega_2$. We can define a scalar function $z$ on $N$ by $omega_2 = z
-omega_1$, or equivalently we also write this as $z = omega_2 / omega_1$.
-
-We define the Fisher divergence of $omega_1$ and $omega_2$ as
+and $omega_2$. We define the Fisher divergence of $omega_1$ and $omega_2$ as
 
 $
-  cal(F)_g (omega_1, omega_2) = integral norm(nabla log(z))^2_g d omega_1.
+  cal(F)_g (omega_1, omega_2) = integral norm(nabla log(omega_2 / omega_1))^2_g d omega_1.
 $
 
 Note that $cal(F)$ requires more structure on $N$ than KL-divergence
-$integral log(z) d omega_1$, as the norm depends on the metric tensor. Given a second 
-(non-Riemannian) manifold $M$ with a probability volume form
-$mu$, and a diffeomorphism $f: N arrow M$, we can define the divergence between
-$mu$ and $omega_1$ by pulling back $mu$ to $N$, i.e. $cal(F)_g (f^* mu, omega_1)$.
-
-We can also compute this Fisher divergence directly on $M$, by pushing the
+$integral log(omega_2 / omega_1) d omega_1$, as the norm depends on the metric 
+tensor $g$. Given a second (non-Riemannian) manifold $M$ with a probability volume form
+$mu$ and a diffeomorphism $f: N arrow M$, we can define the divergence between
+$mu$ and $omega_2$ by pulling back $mu$ to $N$, i.e. $cal(F)_g (f^* mu, omega_2)$. We 
+can also compute this Fisher divergence directly on $M$, by pushing forward the
 metric tensor to $M$:
 
 $
-  cal(F)_g (f^* mu, omega_1) = cal(F)_((f^(-1))^*g) (mu, (f^(-1))^* omega_1)
+  cal(F)_g (f^* mu, omega_2) = cal(F)_((f^(-1))^*g) (mu, (f^(-1))^* omega_2)
 $
 
 In this case, $mu$ is our posterior, $M$ is the space on which it is originally defined, 
-and $omega_1$ is the standard normal distribution.
+and $omega_2$ is the standard normal distribution.
 
 == Affine choices for the diffeomorphism $F$
 <specific-choices-for-the-diffeomorphism-f>
@@ -279,15 +326,15 @@ The full affine diffeomorphism $f_(A , mu) (y) = A y + mu$ corresponds to a mass
 $M = (A A^T )^(-1)$. The Fisher divergence in this case is
 
 $ 
-  hat(cal(F)) [f] = 1/N sum norm(A^T s_i + A^(-1) (x_i - mu))^2
+  hat(cal(F)) [f_(A , mu)] = 1/N sum norm(A^T s_i + A^(-1) (x_i - mu))^2
 $
 
 which is minimized when $A A^T cov(x_i) A A^T = cov(alpha_i)$ (proof in 
 #ref(<appendix-proof-affine>)), corresponding again to the derivation in 
 #ref(<motivation-gaussian>). Because $hat(cal(F))$ only depends on $A A^T$ and $mu$,
-we can restrict $A$ to be symmetric positive definite. If the two covariance matrices are
-full rank, we get a unique minimum at the geometric mean of $cov(x_i)$ and
-$cov(s_i)$.
+we restrict $A$ to be symmetric positive definite such that there is a unique solution 
+for $A$. If the two covariance matrices are full rank, we get a unique minimum at 
+the geometric mean of $cov(x_i)$ and $cov(s_i)$.
 
 === Diagonal plus low-rank
 
@@ -299,7 +346,7 @@ returning a truncated set of eigenvectors $U_c$ and corresponding eigenvalues $L
 In fact, we implement this as the composition of two affine transformations, the first one being the element-wise (diagonal) affine 
 transformation defined earlier, and the second a low-rank approximation to the geometric 
 mean of the draw and gradient empirical covariance matrices. The corresponding 
-normalizing flow is $f = f_(A,mu) compose f_(sigma, mu)$, and the mass matrix
+normalizing flow is $f = f_(A,mu) compose f_(sigma, mu)$, and the mass matrix is
 
 $
   Sigma = D^(1/2) (Q U_c (Lambda_c - 1) Q U_c^T + I)D^(1/2)
@@ -311,18 +358,9 @@ var(alpha_i)^(-1/2)$, "pulling back" $mu$ to
 an intermediate space, from which we then optimize a low-rank transformation to the final 
 transformed posterior. For this second leg of optimization, we project $x_i$ and $alpha_i$ into 
 their joint span, compute the geometric mean in this subspace as in #ref(<full-mass-matrix>), and 
-then decompose the resulting $Sigma$. We avoid $O (n^2)$ storage by keeping only the eigenvectors and eigenvalues, 
-which are all that is needed for the HMC steps. To see this, note that 
-the mass matrix is only needed in the leapfrog integrator (see algorithm), where we take 
-$M^(-1) rho$, for the momentum vector $rho$. Since
-
-$
-  M^(-1) rho = rho - U U^T + U Lambda^(-1) U^T rho
-$
-
-this can be done with only $U$ and $Lambda^(-1)$. And 
-since we first do the element-wise transformation, we store the diagonal components 
-from this as well. The algorithm is as follows:
+then decompose the resulting $Sigma$. We can avoid $O (n^2)$ storage by keeping only 
+$Lambda_c$ and $U_c$, which form the reduced $A$, and the diagonal components from the 
+element-wise transformation. The algorithm is as follows:
 
 #algo(
   line-numbers: false,
@@ -480,41 +518,90 @@ We run nutpie and cmdstan on posteriordb to compare performance in terms of
 effective sample size per gradient evaluation and in terms of effective sample
 size per time...
 
-#algo(
-  line-numbers: false,
-  block-align: none,
-  title: "leapfrog",
-  stroke: none,
-  fill: none,
-  parameters: ($theta$, $rho$, $L$, $epsilon$, $M$),
- )[
-    $theta^(0) <- theta, rho^(0) <- rho$\
-    for $i "from" 0 "to" L$:#i\
-      $rho^((i+1/2)) <- rho^((i))- epsilon/2 nabla U(theta^((i)))$ #comment[half-step momentum]\
-      $theta^((i+1)) <- theta^((i)) + epsilon Sigma^(-1) rho^((i + 1/2))$ #comment[full-step position]\
-      $rho^((i+1)) <- rho^((i+ 1/2))- epsilon/2 nabla U(theta^((i+1)))$ #comment[half-step momentum]#d\
-    return $(theta^((L)),rho^((L)))$
-  ]
+#pagebreak()
+#bibliography("FisherHMCPaper.bib", style: "ieee")
 
-#algo(
-  line-numbers: false,
-  block-align: none,
-  title: "nutpie-leapfrog",
-  stroke: none,
-  fill: none,
-  parameters: ($theta$, $rho$, $L$, $epsilon$, $f$),
- )[
-    $y = f^*(theta^0), nabla U = nabla f^*(theta^0)$ #comment[pull back $theta$ to $N$]\
-    for $i "from" 0 "to" L$:#i\
-      $rho^((i+1/2)) <- rho^((i))- epsilon/2 nabla U$ #comment[half-step momentum]\
-      $y <- y + epsilon I rho^((i + 1/2))$ #comment[full-step position ($Sigma=I$)]\
-      \
-      $theta = f(y)$ #comment[push-forward $y$ to $M$]\
-      $y = f^*(theta^0), nabla U = nabla f^*(theta^0)$ #comment[evaluate density]\
-      \
-      $rho^((i+1)) <- rho^((i+ 1/2))- epsilon/2 nabla U$ #comment[half-step momentum]#d\
-    return $(theta^((L)),rho^((L)))$
-  ]
+#pagebreak()
+#show: appendix
+
+= Minimization of Fisher divergence for affine transformations
+<appendix-proof-affine>
+
+Here we prove that $hat(F)$ for $F(y) = A y + mu$ is minimal when $Sigma cov(alpha) Sigma = cov(x)$ and
+$mu = dash(x) + Sigma dash(alpha)$, where $Sigma = A A^T$:
+
+Let $G$ be the matrix of scores, with $alpha_i$ as the $i$th column, and similarly let 
+$X$ be the draws matrix, consisting of $x_i$ as the $i$'th column,
+and $Sigma = A A^T$. The Fisher divergence between some $p$ and $N(0,I_d)$ is 
+$
+  E_p [norm(nabla log p(x) + X)^2]
+$
+and as such the estimated divergence is 
+
+$
+  hat(F) = 1/N norm(G+X)^2
+$
+Now, for some transformed $y=A^(-1)(x-mu)$, we have
+
+$
+hat(F)_y = 1/N norm(A^T G + Y)^2 = 1/N norm(A^T G + A^(-1)(X - mu 1^T))_F^2
+$
+
+Differentiating with respect to $mu$, we have:
+
+$
+  (d hat(F)) / (d mu) &= -2 / N tr[bold(1)^T (A^T G + A^(-1) (X - mu bold(1)^T))^T A^(-1)]
+$
+
+Setting this to zero,
+
+$
+  bold(1)^T (A^T G + A^(-1) (X - mu bold(1)^T))^T A^(-1) = 0
+$
+
+It follows that
+
+$
+  mu^* = dash(x) + Sigma dash(alpha)
+$
+
+Differentiating with respect to $A$:
+
+$
+  d hat(F) = 2 / N tr[(A^T G + A^(-1) (X - mu bold(1)^T))^T (d A^T G - A^(-1) d A A^(-1) (X - mu bold(1)^T))]
+$
+
+Plugging in the result for $mu^*$ and using the cyclic- and transpose-invariance properties of the trace gives us
+
+$
+  d hat(F) &= 2 / N tr[(A^T G + A^(-1) (tilde(X) - Sigma dash(alpha) bold(1)^T)) G^T d A] \
+  &quad +2 / N tr[A^(-1) (Sigma dash(alpha) bold(1)^T - tilde(X))(A^T G + A^(-1) (tilde(X) - Sigma dash(alpha) bold(1)^T))^T A^(-1) d A ]
+$
+where $tilde(X) = X - dash(x) bold(1)^T$, the matrix with centered $x_i$ as the
+columns. This is zero for all $d A$ iff
+$
+  0 = (A^T G + A^(-1) (tilde(X) - Sigma dash(alpha) bold(1)^T)) G^T
+  + A^(-1) (Sigma dash(alpha) bold(1)^T - tilde(X))(A^T G + A^(-1) (tilde(X) - Sigma dash(alpha) bold(1)^T))^T A^(-1) \
+  = A^T tilde(G) G^T + A^(-1) tilde(X) G^T + (A^T dash(alpha) bold(1)^T - A^(-1) tilde(X))(tilde(G)^T + tilde(X)^T Sigma^(-1)),
+$
+
+Where similarly $tilde(G) = G - dash(alpha) bold(1)^T$. Because $bold(1)^T tilde(X)^T = bold(1)^T
+tilde(G)^T = 0$, this expands to
+$
+  0 = A^T tilde(G) G^T + A^(-1) tilde(X) G^T - A^(-1) tilde(X) tilde(G)^T - A^(-1)
+  tilde(X) tilde(X)^T Sigma^(-1)
+$
+$
+  = (tilde(G) + Sigma^(-1)tilde(X)) G^T - Sigma^(-1) tilde(X) tilde(G)^T - Sigma^(-1) tilde(X) tilde(X)^T Sigma^(-1) \
+  = tilde(G) G^T + Sigma^(-1) tilde(X) bold(1) dash(alpha)^T - Sigma^(-1) tilde(X) tilde(X)^T Sigma^(-1) \
+  = tilde(G) tilde(G)^T - Sigma^(-1) tilde(X) tilde(X)^T Sigma^(-1)
+$
+
+#pagebreak()
+
+= The No-U-Turn Sampler
+<appendix-nuts>
+
 
 #algo(
   line-numbers: false,
@@ -646,82 +733,3 @@ size per time...
   }),
   caption: [Modified NUTS orbit checks]
 )
-
-#pagebreak()
-#bibliography("FisherHMCPaper.bib", style: "ieee")
-
-#pagebreak()
-#show: appendix
-
-= Minimize Fisher divergence for Affine Transformations
-<appendix-proof-affine>
-
-Here we prove that $hat(F)$ for $F(y) = A y + mu$ is minimal when $Sigma cov(alpha) Sigma = cov(x)$ and
-$mu = dash(x) + Sigma dash(alpha)$, where $Sigma = A A^T$:
-
-Let $G$ be the matrix of scores, with $alpha_i$ as the $i$th column, and similarly let 
-$X$ be the draws matrix, consisting of $x_i$ as the $i$'th column,
-and $Sigma = A A^T$. The Fisher divergence between some $p$ and $N(0,I_d)$ is 
-$
-  E_p [norm(nabla log p(x) + X)^2]
-$
-and as such the estimated divergence is 
-
-$
-  hat(F) = 1/N norm(G+X)^2
-$
-Now, for some transformed $y=A^(-1)(x-mu)$, we have
-
-$
-hat(F)_y = 1/N norm(A^T G + Y)^2 = 1/N norm(A^T G + A^(-1)(X - mu 1^T))_F^2
-$
-
-Differentiating with respect to $mu$, we have:
-
-$
-  (d hat(F)) / (d mu) &= -2 / N tr[bold(1)^T (A^T G + A^(-1) (X - mu bold(1)^T))^T A^(-1)]
-$
-
-Setting this to zero,
-
-$
-  bold(1)^T (A^T G + A^(-1) (X - mu bold(1)^T))^T A^(-1) = 0
-$
-
-It follows that
-
-$
-  mu^* = dash(x) + Sigma dash(alpha)
-$
-
-Differentiating with respect to $A$:
-
-$
-  d hat(F) = 2 / N tr[(A^T G + A^(-1) (X - mu bold(1)^T))^T (d A^T G - A^(-1) d A A^(-1) (X - mu bold(1)^T))]
-$
-
-Plugging in the result for $mu^*$ and using the cyclic- and transpose-invariance properties of the trace gives us
-
-$
-  d hat(F) &= 2 / N tr[(A^T G + A^(-1) (tilde(X) - Sigma dash(alpha) bold(1)^T)) G^T d A] \
-  &quad +2 / N tr[A^(-1) (Sigma dash(alpha) bold(1)^T - tilde(X))(A^T G + A^(-1) (tilde(X) - Sigma dash(alpha) bold(1)^T))^T A^(-1) d A ]
-$
-where $tilde(X) = X - dash(x) bold(1)^T$, the matrix with centered $x_i$ as the
-columns. This is zero for all $d A$ iff
-$
-  0 = (A^T G + A^(-1) (tilde(X) - Sigma dash(alpha) bold(1)^T)) G^T
-  + A^(-1) (Sigma dash(alpha) bold(1)^T - tilde(X))(A^T G + A^(-1) (tilde(X) - Sigma dash(alpha) bold(1)^T))^T A^(-1) \
-  = A^T tilde(G) G^T + A^(-1) tilde(X) G^T + (A^T dash(alpha) bold(1)^T - A^(-1) tilde(X))(tilde(G)^T + tilde(X)^T Sigma^(-1)),
-$
-
-Where similarly $tilde(G) = G - dash(alpha) bold(1)^T$. Because $bold(1)^T tilde(X)^T = bold(1)^T
-tilde(G)^T = 0$, this expands to
-$
-  0 = A^T tilde(G) G^T + A^(-1) tilde(X) G^T - A^(-1) tilde(X) tilde(G)^T - A^(-1)
-  tilde(X) tilde(X)^T Sigma^(-1)
-$
-$
-  = (tilde(G) + Sigma^(-1)tilde(X)) G^T - Sigma^(-1) tilde(X) tilde(G)^T - Sigma^(-1) tilde(X) tilde(X)^T Sigma^(-1) \
-  = tilde(G) G^T + Sigma^(-1) tilde(X) bold(1) dash(alpha)^T - Sigma^(-1) tilde(X) tilde(X)^T Sigma^(-1) \
-  = tilde(G) tilde(G)^T - Sigma^(-1) tilde(X) tilde(X)^T Sigma^(-1)
-$
