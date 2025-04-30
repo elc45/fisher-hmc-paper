@@ -5,6 +5,10 @@
 
 #show: set text(size: 12pt)
 
+#set par(
+  first-line-indent: 1em
+)
+
 #show: arkheion.with(
   title: [
     If Only My Posterior Were Normal:\
@@ -163,11 +167,9 @@ $
 and we can recover $Sigma$ as the
 geometric mean of the positive symmetric matrices $cov(x_i)$ and
 $cov(s_i)^(-1)$:
-
 $
   Sigma = cov(x_i)^(-1/2)(cov(x_i)^(1/2)cov(alpha_i)cov(x_i)^(1/2))^(1/2)cov(x_i)^(-1/2)
 $
-
 In this way we can compute the parameters of the normal distribution
 exactly. Of course, most posterior distributions of interest are not multivariate normal, and if they were, we 
 would not have to run MCMC in the first place. But it is common in Bayesian inference for the posterior
@@ -177,7 +179,7 @@ scores contain useful information that is ignored in standard methods.
 == Transformed HMC
 <transformed-hmc>
 When we manually reparameterize a model to make HMC more efficient, we try to
-find a transformation (or diffeomorphism) of our posterior such that HMC performs better on it. Formally, 
+find a transformation of our posterior such that HMC performs better on it. Formally, 
 if our posterior $mu$ is defined on a space $M$, we try to find a
 diffeomorphism $f: N arrow M$ such that the transformed posterior $f^*mu$ is well-behaved with respect to some property. 
 Note that we define the transformation as a function
@@ -208,9 +210,20 @@ integrator:
     return $(theta^((L)),rho^((L)))$
   ]
 
-Implemented as a normalizing flow, however, the draws are pulled back along $f$ to 
-a more forgiving space where the Hamiltonian is simulated, using an identity mass 
-matrix:
+In a transformed setting, however, draws in the posterior space $M$ are pulled 
+back along $f$ to the more forgiving space $N$. Leapfrog requires computing the log densities 
+and scores in the transformed space. In practice, we work with densities $p$ and 
+$q$ relative to Lebesgue measures $lambda_N, lambda_M$: $mu = p lambda_M, 
+f^*mu = q lambda_N$. So our transformed score is $nabla log(f^*mu / lambda_N)$. Note, 
+however, that the computation of this transformed score requires a push-forward. 
+Using the change-of-variables $f^*lambda_M = abs(det(d f)) lambda_N$, we have
+$
+  nabla log(f^*mu / lambda_N) = nabla log(f^*p / lambda_M (f^*lambda_M)/lambda_N) = f^*
+  nabla log(p) + nabla log abs(det(d f)) = hat(f)^*(nabla log(p), 1)
+$
+where $hat(f): N arrow M times bb(R), x arrow.bar (f(x), log abs(det(f)))$. On 
+$N$, the Hamiltonian is simulated using an identity mass matrix, meaning we no 
+longer distinguish between momentum and velocity.
 
 #algo(
   line-numbers: false,
@@ -218,27 +231,65 @@ matrix:
   title: "nf-leapfrog",
   stroke: none,
   fill: none,
-  parameters: ($theta$, $rho$, $L$, $epsilon$, $f$),
+  parameters: ($theta$, $v$, $L$, $epsilon$, $f$),
  )[
-    $theta^(0) <- theta, rho^(0) <- rho$\
-    $y = f^*(theta^0), nabla U = nabla f^*(theta^0)$ #comment[pull back $theta$ to $N$]\
-    for $i "from" 0 "to" L$:#i\
-      $rho^((i+1/2)) <- rho^((i))- epsilon/2 nabla U$ #comment[half-step momentum]\
-      $y <- y + epsilon I rho^((i + 1/2))$ #comment[full-step position ($Sigma=I$)]\
+    $theta^(0) <- theta, v^(0) <- v$\
+    $y <- f^(-1)(theta^0)$\
+    $delta <- nabla log(f^* mu / lambda_N) (y)$ #comment[evaluate score on $N$]\
+    for $i "from" 1 "to" L$:#i\
+      $v^((i+1/2)) <- v^((i))- epsilon/2 delta$ #comment[half-step velocity]\
+      $y <- y + epsilon v^((i + 1/2))$ #comment[full-step position ($Sigma=I$)]\
       \
-      $theta^((i)) = f(y)$ #comment[push-forward $y$ to $M$]\
-      $y = f^*(theta^((i))), nabla U = nabla f^*(theta^((i)))$ #comment[evaluate density]\
+      $theta^((i)) <- f(y)$ #comment[recover corresponding draw on $M$]\
+      $delta <- nabla log(f^* mu / lambda_N) (y)$\
       \
-      $rho^((i+1)) <- rho^((i+ 1/2))- epsilon/2 nabla U$ #comment[half-step momentum]#d\
-    return $(theta^((L)),rho^((L)))$
+      $v^((i+1)) <- v^((i+ 1/2))- epsilon/2 delta$ #comment[half-step velocity]#d\
+    return $theta$
   ]
+
+#algo(
+  line-numbers: false,
+  block-align: none,
+  title: "nf-leapfrog",
+  stroke: none,
+  fill: none,
+  parameters: ($theta$, $v$, $L$, $epsilon$, $f$),
+ )[
+    $theta^(0) <- theta, v^(0) <- v$\
+    $y, delta <-$ #smallcaps("pullback")$(f, theta^0)$\
+    for $i "from" 1 "to" L$:#i\
+      $v^((i+1/2)) <- v^((i))- epsilon/2 delta$ #comment[half-step velocity]\
+      $y <- y + epsilon v^((i + 1/2))$ #comment[full-step position ($Sigma=I$)]\
+      \
+      $theta^((i)) <- f(y)$ #comment[recover corresponding draw on $M$]\
+      $y, delta <-$ #smallcaps("pullback")$(f, theta^((i)))$\
+      \
+      $v^((i+1)) <- v^((i+ 1/2))- epsilon/2 delta$ #comment[half-step velocity]#d\
+    return $theta^((L))$
+  ]
+
+#algo(
+  line-numbers: false,
+  block-align: none,
+  title: "pullback",
+  stroke: none,
+  fill: none,
+  parameters: ($f$, $theta$),
+ )[
+    $y <- f^(-1)(theta)$ #comment[pull back $theta$ to $N$]\
+    $delta <- nabla log(f^* mu / lambda_N) (y)$ #comment[evaluate score on $N$]\
+    
+    return $(y, delta)$
+  ]
+
+
 
 == Fisher Divergence
 
 HMC efficiency is notoriously dependent on the parametrization, so it is to be expected that
 transformed HMC be much more efficient for some choices of $f$ than
 for others. It is not, however, obvious what criterion should be used to evaluate 
-a particular choice of $f$, in order to guide an automatic learning of the transformation. We
+a particular choice of $f$, in order to guide the learning of a transformation. We
 need a loss function that maps the diffeomorphism to a measure of difficulty for
 HMC. This is hard to quantify in general, but we can observe that HMC efficiency
 largely depends on the trajectory, which in fact does not depend on the
@@ -267,7 +318,7 @@ tensor $g$. Given a second (non-Riemannian) manifold $M$ with a probability volu
 $mu$ and a diffeomorphism $f: N arrow M$, we can define the divergence between
 $mu$ and $omega_2$ by pulling back $mu$ to $N$, i.e. $cal(F)_g (f^* mu, omega_2)$. We 
 can also compute this Fisher divergence directly on $M$, by pushing forward the
-metric tensor to $M$:
+metric tensor:
 
 $
   cal(F)_g (f^* mu, omega_2) = cal(F)_((f^(-1))^*g) (mu, (f^(-1))^* omega_2)
@@ -276,8 +327,8 @@ $
 In this case, $mu$ is our posterior, $M$ is the space on which it is originally defined, 
 and $omega_2$ is the standard normal distribution.
 
-== Affine choices for the diffeomorphism $F$
-<specific-choices-for-the-diffeomorphism-f>
+== Affine choices for the diffeomorphism
+<diffeomorphism-choices>
 
 We focus on three families of affine diffeomorphisms $F$, for which derive specific results.
 
@@ -293,8 +344,8 @@ $
   + sigma^(-1) dot.circle (x_i - mu))^2
 $
 
-This is a special case of affine transformation and minimal when $sigma = var(x_i)^(1/2)
-var(alpha_i)^(-1/2)$ and $mu = dash(x)_i + sigma^2 dash(s)_i$, corresponding to 
+This is a special case of affine transformation and minimal at $sigma^* = var(x_i)^(1/2)
+var(alpha_i)^(-1/2)$ and $mu^* = dash(x)_i + sigma^2 dash(s)_i$, corresponding to 
 the result in #ref(<motivation-gaussian>). This solution is very computationally 
 inexpensive, and is hence the default in nutpie. Using Welford's algorithm 
 to keep online estimates of the draw and score variances during sampling (thereby avoiding the 
@@ -305,17 +356,15 @@ If our target density is $N(mu , Sigma)$, then the minimizers $mu^*$ and
 $sigma^*$ of $hat(cal(F))$ derived above converge to $mu$ and $exp (1/2 log diag(Sigma) -
 1/2 log diag(Sigma^(- 1)))$, respectively. This is a direct consequence of the fact that 
 $cov(x_i) arrow Sigma$ and $cov(alpha_i) arrow Sigma^(-1)$. The divergence $hat(cal(F))$ converges to $sum_i lambda_i + lambda_i^(- 1)$, where $lambda_i$
-are the generalized eigenvalues of $Sigma$ with respect to $diag(hat(sigma)^2)$,
-so large and small eigenvalues are penalized. When we choose $diag(Sigma)$ as
-mass matrix, we effectively minimize $sum_i lambda_i$, and only penalize large
-eigenvalues. If we choose $diag(bb(E) (alpha alpha^T))$, as proposed, for
-instance, in #cite(<tran_tuning_2024>, form: "prose"), we effectively minimize
-$sum lambda_i^(- 1)$ and only penalize small eigenvalues. But based on
-theoretical results for multivarite normal posteriors in
-#cite(<langmore_condition_2020>, form: "prose"), we know that both large and
-small eigenvalues make HMC less efficient. To this effect, we 
-
-We can use the result in (todo ref) to evaluate the different diagonal mass
+are the generalized eigenvalues of $Sigma$ with respect to $diag(hat(sigma)^2)$.
+So large and small eigenvalues are penalized. Choosing $diag(Sigma)$ as our 
+mass matrix effectively minimizes $sum_i lambda_i$, only penalizing large
+eigenvalues. If we choose $diag(bb(E) (alpha alpha^T))$, as proposed in 
+#cite(<tran_tuning_2024>, form: "prose"), we effectively minimize
+$sum lambda_i^(- 1)$ and only penalize small eigenvalues. But based on theoretical 
+results for multivariate normal posteriors in #cite(<langmore_condition_2020>, form: "prose"), 
+we know that both large and small eigenvalues make HMC less efficient. We can use this 
+result to evaluate the different diagonal mass
 matrix choices on various gaussian posteriors, with different numbers of
 observations. Figure todo shows the resulting condition numbers of the posterior
 as seen by the sampler in the transformed space.
@@ -370,8 +419,8 @@ element-wise transformation. The algorithm is as follows:
   fill: none,
   parameters: ($X$, $S$, $c$, $gamma$),
 )[
-    $X <- (X-dash(X)) dot.circle hat(sigma)_X^(-1) * hat(sigma)_S$ #comment[apply diagonal transform]\
-    $S <- (S-dash(S)) dot.circle hat(sigma)_X^(-1) * hat(sigma)_S$\
+    $X <- (X-dash(X)) dot.circle hat(sigma)_X^(-1) hat(sigma)_S$ #comment[apply diagonal transform]\
+    $S <- (S-dash(S)) dot.circle hat(sigma)_X^(-1) hat(sigma)_S$\
     \
     $U^X <-$ #smallcaps("svd")$(X), U^S <-$ #smallcaps("svd")$(S)$\
     \
@@ -396,7 +445,7 @@ element-wise transformation. The algorithm is as follows:
 
 Whether we adapt a mass matrix using the posterior variance as Stan does, or if
 we use a bijection based on the Fisher divergence, we
-inevitably have the same problem: in order to generate suitable posterior draws, we need a good mass 
+invariably have the same challenge: in order to generate suitable posterior draws, we need a good mass 
 matrix (or bijection), but to estimate a good mass-matrix, we
 need posterior draws. There is a well-known way out of this "chicken and egg" conundrum: 
 we start sampling with an initial transformation, and collect a number of draws; based 
@@ -435,7 +484,8 @@ previous $k$ draws. However, this is computationally inefficient (unless the log
 is very expensive), and is not easily implemented as a streaming estimator
 \(see below for more details). Using several overlapping estimation
 windows, though, we can compromise between optimal information usage and computational
-cost, while still using streaming estimators. We split the warmup into two adaptation regimes, 
+cost, while still using streaming estimators. We split the matrix adaptation in the warmup 
+phase into two regimes, 
 the first with a very quick update frequency (10 draws) and the second with a much longer 
 one (80 draws).
 
@@ -451,7 +501,7 @@ one (80 draws).
     $F$ = #smallcaps("MassMatrixEstimator")$()$\
     $F$ = #smallcaps("update")$(F, theta_0, alpha_0)$\
     $B$ = #smallcaps("MassMatrixEstimator")$()$\
-    ss_estimator = #smallcaps("StepSizeAdapt")$(theta_0, alpha_0)$\
+    $epsilon$ = #smallcaps("StepSizeAdapt")$(theta_0, alpha_0)$\
     $II_"init" <- 1$ #comment[indicator for initial mass matrix]\
     \
     for $i$ in 1 to $N$:#i\
@@ -459,21 +509,22 @@ one (80 draws).
       $e = i < N_e$ #comment[indicator for early regime]\
       $l = N - i < N_l$ #comment[indicator for late regime]\
       $M <- F$\
-      $theta, rho$ = #smallcaps("hmc_step")$(M, epsilon, theta, alpha)$ #comment[simulate Hamiltonian]\
+      $theta, rho$ = #smallcaps("hmc-step")$(M, epsilon, theta, alpha)$ #comment[simulate Hamiltonian]\
       \
       if $(1-e) or ("steps_from_init" > 4)$:#i\
       $F$ = #smallcaps("update")$(F, theta, alpha)$\
       $B$ = #smallcaps("update")$(B, theta, alpha)$#d\
       if $l$:#i\
-      step_size = ss_estimator.current_warmup()\
-      continue #d\
+      Update $epsilon$\
+      #text(weight: "bold")[continue] #d\
+      Update $epsilon$\
       $nu <- nu_e$ if $e$ else $nu_l$ \
       $r <- N - i - N_l$\
       if $r > nu_l$ and #smallcaps("NumPoints")$(B) > nu$:#i\
         $F <- G$\
         $B <-$ #smallcaps("MassMatrixEstimator")$()$\
         if $II_"init"$:#i\
-          ss_estimator.reset()\
+          reset stepsize\
           $II_"init" <- 0$ #d #d\
     return
   ]
@@ -481,7 +532,7 @@ one (80 draws).
 #algo(
   line-numbers: false,
   block-align: none,
-  title: "Update",
+  title: "update",
   stroke: none,
   fill: none,
   parameters: ($hat(sigma)^2_(n-1)$, $x_(n-1)$, $x_n$),
