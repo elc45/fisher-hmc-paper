@@ -467,7 +467,7 @@ also makes the initialization independent of variable scaling.
 
 Most widely used HMC implementations do not run vanilla HMC, but variants, most notably the 
 No-U-Turn Sampler (NUTS) #cite(<hoffman_nuts_2011>), where 
-the length of the Hamiltonian trajectory is chosen dynamically. Such schemas can make 
+the length of the Hamiltonian trajectory is chosen dynamically (see #ref(<appendix-nuts>)). Such schemas can make 
 it extremely costly to generate draws with a poor mass matrix, because in these cases the 
 algorithm can take a huge number of HMC steps for each draw (typically up to 1000). Thus 
 very early on during sampling, we have a big incentive to use
@@ -479,13 +479,22 @@ increasing length, the first of which (25 draws) still uses the initial mass mat
 These 100 draws before the first mass matrix change can constitute a sizable percentage 
 of the total sampling time.
 
-Intuition might suggest that we could just use a tailing window and update at each step based on the
-previous $k$ draws. However, this is computationally inefficient (unless the logp function
-is very expensive), and is not easily implemented as a streaming estimator
-\(see below for more details). Using several overlapping estimation
-windows, though, we can compromise between optimal information usage and computational
-cost, while still using streaming estimators. We split the matrix adaptation in the warmup 
-phase into two regimes, 
+Intuition might suggest that we could just use a tailing window and update the matrix at 
+each iteration to an estimate based on the previous $k$ draws via Welford's algorithm 
+for online variance estimation. However, removing the influence of early draws when they are no longer in the 
+window requires rewinding the algorithm, which is unnecessarily inefficient and not 
+easily implemented. Using two overlapping estimation windows - a "foreground" and a 
+"background" - we can accomplish the goal of using recent information immediately, while 
+avoiding the computation cost of pure streaming estimation. At each iteration in the 
+warmup phase, the transformation used is taken from the "foreground" estimator (which 
+itself is updated at each iteration). The "background" estimator, while using the same 
+update logic, maintains a fresher estimate based on only the previous $n$ draws, 
+periodically handing off this fresher estimate to the foreground, then resetting itself. 
+The foreground estimator then builds on this estimate until recieving a new one. In this 
+way, the estimate used for the transformation at any iteration is informed by at most 
+$2n$ draws, where $n$ is the update frequency.
+
+We split the matrix adaptation in the warmup phase into two regimes, 
 the first with a very quick update frequency (10 draws) and the second with a much longer 
 one (80 draws).
 
@@ -495,36 +504,36 @@ one (80 draws).
   title: "warmup",
   stroke: none,
   fill: none,
-  parameters: ($N$, $N_e$, $N_l$, $nu_e: 10$, $nu_l: 80$)
+  parameters: ($N$, $N_"early"$, $N_"late"$, $nu_"early": 10$, $nu_"late": 80$)
 )[
     $theta_0, alpha_0 med \~ med p(theta)$ #comment[initial draw from prior]\
-    $F$ = #smallcaps("MassMatrixEstimator")$()$\
+    $F$ = #smallcaps("MassMatrixEstimator")$()$#comment[foreground estimator]\
     $F$ = #smallcaps("update")$(F, theta_0, alpha_0)$\
-    $B$ = #smallcaps("MassMatrixEstimator")$()$\
+    $B$ = #smallcaps("MassMatrixEstimator")$()$#comment[background estimator]\
     $epsilon$ = #smallcaps("StepSizeAdapt")$(theta_0, alpha_0)$\
     $II_"init" <- 1$ #comment[indicator for initial mass matrix]\
     \
     for $i$ in 1 to $N$:#i\
       
-      $e = i < N_e$ #comment[indicator for early regime]\
-      $l = N - i < N_l$ #comment[indicator for late regime]\
-      $M <- F$\
-      $theta, rho$ = #smallcaps("hmc-step")$(M, epsilon, theta, alpha)$ #comment[simulate Hamiltonian]\
+      $"early" = i < N_"early"$ #comment[indicator for early regime]\
+      $"late" = N - i < N_"late"$ #comment[indicator for late regime]\
+      $f <-$ #smallcaps("get-transform")$(F)$\
+      $theta^((i))$ = #smallcaps("hmc-step")$(theta^((i-1)), epsilon, f)$ #comment[simulate Hamiltonian]\
       \
-      if $(1-e) or ("steps_from_init" > 4)$:#i\
-      $F$ = #smallcaps("update")$(F, theta, alpha)$\
+      if #text(weight: "bold")[not] $"early"$:#i\
+      $F$ = #smallcaps("update")$(F, theta, alpha)$#comment[update both windows]\
       $B$ = #smallcaps("update")$(B, theta, alpha)$#d\
-      if $l$:#i\
-      Update $epsilon$\
+      if $"late"$:#i\
+      #smallcaps("update")$(epsilon)$\
       #text(weight: "bold")[continue] #d\
-      Update $epsilon$\
-      $nu <- nu_e$ if $e$ else $nu_l$ \
-      $r <- N - i - N_l$\
-      if $r > nu_l$ and #smallcaps("NumPoints")$(B) > nu$:#i\
-        $F <- G$\
-        $B <-$ #smallcaps("MassMatrixEstimator")$()$\
+      #smallcaps("update")$(epsilon)$\
+      $nu <- nu_"early"$ if $"early"$ else $nu_"late"$ \
+      $N_"remain" <- N - i - N_"late"$\
+      if $N_"remain" > nu_"late"$ and #smallcaps("n-draws")$(B) > nu$:#i\
+        $F <- G$#comment[dump background into foreground]\
+        $B <-$ #smallcaps("MassMatrixEstimator")$()$ #comment[reset background estimator]\
         if $II_"init"$:#i\
-          reset stepsize\
+          #smallcaps("reset")$(epsilon)$\
           $II_"init" <- 0$ #d #d\
     return
   ]
@@ -784,3 +793,77 @@ $
   }),
   caption: [Modified NUTS orbit checks]
 )
+
+#algo(
+  line-numbers: false,
+  block-align: none,
+  title: "MassMatrix.update",
+  stroke: none,
+  fill: none,
+  parameters: ($dash(x)_n$, $r$),
+ )[
+    def update(self, position, score):#i\
+        $dash(x)_n <- dash(x)_(n-1) + 1/n (x_n - dash(x)_(n-1))$\
+        $hat(sigma)^2_n <- (1/(n-1)) hat(sigma)^2_(n-1) + (x_n - dash(x)_(n-1))^2$\
+        return $sigma^2$#d\
+    def current(self) -> MassMatrix:
+        ...
+    def num_points(self) -> int:
+        ...
+ ]
+
+class StepSizeAdapt:
+    def reset(self):
+        ...
+    def update(self, accept_statistic):
+        ...
+    def current_warmup(self) -> float:
+        ...
+    def current_best(self) -> float:
+        ...
+
+```python
+def warmup(num_warmup, num_early, num_late, early_switch_freq, late_switch_freq):
+    position, score = draw_from_prior()
+    foreground_window = MassMatrixEstimator()
+    foreground_window.update(position, score)
+    background_window = MassMatrixEstimator()
+    step_size_estimator = StepSizeAdapt(position, score)
+    first_mass_matrix = True
+
+    for draw in range(num_warmup):
+        is_early = draw < num_early
+        is_late = num_warmup - draw < num_late
+
+        mass_matrix = foreground_window.current()
+        step_size = step_size_estimator.current_warmup()
+        (
+          accept_stat, accept_stat_sym, position, score,
+          diverging, steps_from_init
+        ) = hmc_step(mass_matrix, step_size, position, score)
+
+        # Early on we ignore diverging draws that did not move
+        # several steps. They probably just used a terrible step size
+        ok = (not is_early) or (not diverging) or (steps_from_init > 4)
+        if ok:
+            foreground_window.update(position, score)
+            background_window.update(position, score)
+
+        if is_late:
+            step_size_estimator.update(accept_stat_sym)
+            continue
+
+        step_size_estimator.update(accept_stat)
+
+        switch_freq = early_switch_freq if is_early else late_switch_freq
+        remaining = num_warmup - draw - num_late
+        if (remaining > late_switch_freq
+            and background_window.num_points() > switch_freq
+        ):
+
+            foreground_window = background_window
+            background_window = MassMatrixEstimator()
+            if first_mass_matrix:
+                step_size_estimator.reset()
+            first_mass_matrix = False
+```
