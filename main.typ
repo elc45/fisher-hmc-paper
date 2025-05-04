@@ -214,7 +214,7 @@ In a transformed setting, however, draws in the posterior space $M$ are pulled
 back along $f$ to the more forgiving space $N$. Leapfrog requires computing the log densities 
 and scores in the transformed space. In practice, we work with densities $p$ and 
 $q$ relative to Lebesgue measures $lambda_N, lambda_M$: $mu = p lambda_M, 
-f^*mu = q lambda_N$. So our transformed score is $nabla log(f^*mu / lambda_N)$. Note, 
+f^*mu = q lambda_N$. The transformed score is $nabla log(f^*mu / lambda_N)$. Note, 
 however, that the computation of this transformed score requires a push-forward. 
 Using the change-of-variables $f^*lambda_M = abs(det(d f)) lambda_N$, we have
 $
@@ -455,9 +455,6 @@ unchanged for a number of years. PyMC, Numpyro, and Blackjax all use the
 same details as Stan, with at most minor modifications. There are, however, a couple of 
 small changes that improve the efficiency of this schema significantly.
 
-== Choice of initial diffeomorphism
-<choice-of-initial-mass-matrix>
-
 Stan's HMC sampler begins warmup using an identity mass matrix. We instead initialize with 
 $M=diag(alpha_0^T alpha_0)$, which in expectation is equal to the Fisher information. This 
 also makes the initialization independent of variable scaling.
@@ -485,14 +482,15 @@ for online variance estimation. However, removing the influence of early draws w
 window requires rewinding the algorithm, which is unnecessarily inefficient and not 
 easily implemented. Using two overlapping estimation windows - a "foreground" and a 
 "background" - we can accomplish the goal of using recent information immediately, while 
-avoiding the computation cost of pure streaming estimation. At each iteration in the 
+avoiding the computational cost of pure streaming estimation. At each iteration in the 
 warmup phase, the transformation used is taken from the "foreground" estimator (which 
 itself is updated at each iteration). The "background" estimator, while using the same 
 update logic, maintains a fresher estimate based on only the previous $n$ draws, 
 periodically handing off this fresher estimate to the foreground, then resetting itself. 
 The foreground estimator then builds on this estimate until recieving a new one. In this 
-way, the estimate used for the transformation at any iteration is informed by at most 
-$2n$ draws, where $n$ is the update frequency.
+way, the estimate used for the transformation at any given iteration is informed by at most 
+$2n$ draws, where $n$ is the update frequency. This scheme is illustrated 
+in #ref(<adapt_figure>).
 
 We split the matrix adaptation in the warmup phase into two regimes, 
 the first with a very quick update frequency (10 draws) and the second with a much longer 
@@ -508,7 +506,7 @@ one (80 draws).
 )[
     $theta_0, alpha_0 med \~ med p(theta)$ #comment[initial draw from prior]\
     $F$ = #smallcaps("MassMatrixEstimator")$()$#comment[foreground estimator]\
-    $F$ = #smallcaps("update")$(F, theta_0, alpha_0)$\
+    #smallcaps("update-estimates")$(F, theta_0, alpha_0)$\
     $B$ = #smallcaps("MassMatrixEstimator")$()$#comment[background estimator]\
     $epsilon$ = #smallcaps("StepSizeAdapt")$(theta_0, alpha_0)$\
     $II_"init" <- 1$ #comment[indicator for initial mass matrix]\
@@ -518,11 +516,11 @@ one (80 draws).
       $"early" = i < N_"early"$ #comment[indicator for early regime]\
       $"late" = N - i < N_"late"$ #comment[indicator for late regime]\
       $f <-$ #smallcaps("get-transform")$(F)$\
-      $theta^((i))$ = #smallcaps("hmc-step")$(theta^((i-1)), epsilon, f)$ #comment[simulate Hamiltonian]\
+      $theta^((i)), alpha^((i))$ = #smallcaps("hmc-step")$(theta^((i-1)), epsilon, f)$ #comment[simulate Hamiltonian]\
       \
       if #text(weight: "bold")[not] $"early"$:#i\
-      $F$ = #smallcaps("update")$(F, theta, alpha)$#comment[update both windows]\
-      $B$ = #smallcaps("update")$(B, theta, alpha)$#d\
+      #smallcaps("update-estimates")$(F, theta^((i)), alpha^((i)))$#comment[update both windows]\
+      #smallcaps("update-estimates")$(B, theta^((i)), alpha^((i)))$#d\
       if $"late"$:#i\
       #smallcaps("update")$(epsilon)$\
       #text(weight: "bold")[continue] #d\
@@ -541,34 +539,59 @@ one (80 draws).
 #algo(
   line-numbers: false,
   block-align: none,
+  title: "MassMatrixEstimator",
+  stroke: none,
+  fill: none,
+  parameters: (),
+ )[
+    #text(weight: "bold")[def] #smallcaps("update-estimates")$("self", theta, alpha)$:#i\
+        $n <- "self".n$\
+        $dash(theta), hat(sigma)_theta^2 <-$ #smallcaps("update")$(n, hat(sigma)_(theta)^2, dash(theta), theta)$#comment[Welford update for draws]\
+        $dash(alpha), hat(sigma)_alpha^2 <-$ #smallcaps("update")$(n, hat(sigma)_(alpha)^2, dash(alpha), alpha)$#comment[update gradients]\
+        $"self".n <- n + 1$\
+        return #d\
+
+    #text(weight: "bold")[def] #smallcaps("current")$()$:#i\
+        return $(dash(theta), dash(alpha), hat(sigma)_theta^2, hat(sigma)_alpha^2)$#d\
+    #text(weight: "bold")[def] #smallcaps("n-points")$()$:#i\
+        return $"self".n$#d
+ ]
+
+#algo(
+  line-numbers: false,
+  block-align: none,
   title: "update",
   stroke: none,
   fill: none,
-  parameters: ($hat(sigma)^2_(n-1)$, $x_(n-1)$, $x_n$),
+  parameters: ($n$, $hat(sigma)^2_(n-1)$, $dash(x)_(n-1)$, $x_n$),
  )[
     $dash(x)_n <- dash(x)_(n-1) + 1/n (x_n - dash(x)_(n-1))$\
     $hat(sigma)^2_n <- (1/(n-1)) hat(sigma)^2_(n-1) + (x_n - dash(x)_(n-1))^2$\
-    return $sigma^2$
+    return $(dash(x)_n, hat(sigma)_n^2)$
   ]
 
+#figure(
+  image("figures/adapt_figure.png", width: 80%),
+  caption: [Example mass matrix adaptation scheme with background (below) and 
+  foreground (above) variance estimators, with a switch/flush frequency of 10 
+  draws. Labels beneath states $Sigma_{"iter"}$ indicate the draws (and 
+  their gradients) on which that estimate is based. The transformation used for 
+  the Hamiltonian at each iteration is informed by the estimate stored in the 
+  foreground's state.
+  ],
+) <adapt_figure>
 
 = Implementation in nutpie
 
-The core algorithms are implemented in rust, which all array operations
-abstracted away, to allow users of the rust API to provide GPU implementations.
-
-It can take PyMC or Stan models.
-
-Stan is used through bridgestan, which compiles C libraries that nutpie can load
-dynamically to call the logp function gradient with little overhead.
-
-PyMC models can be sampled either through the numba backend, which
+The core algorithms presented here are implemented in the rust language, with all 
+array operations abstracted away to allow users of the rust API to provide GPU 
+implementations. Nutpie accepts both PyMC and Stan models, the latter accessed through 
+the bridgestan library, which compiles C libraries that nutpie can load dynamically 
+to call the logp function gradient with little overhead. PyMC models can be sampled either through the numba backend, which
 also allows evaluating the density and its gradient with little overhead.
-Alternatively, it can use the pymc jax backend. This incurs a higher per-call
+Alternatively, it can use the PyMC Jax backend. This incurs a higher per-call
 overhead, but allows evaluating the density on the GPU, which can significantly
-speed up sampling for larger models.
-
-nutpie returns sampling traces as ArviZ datasets, to allow easy posterior analysis
+speed up sampling for larger models. Traces are returned as ArviZ inference data objects, allowing for easy posterior analysis
 and convergence checks. Code: #link("https://github.com/pymc-devs/nutpie")
 
 = Experimental evaluation of nutpie
@@ -669,10 +692,10 @@ $
   title: "nuts",
   stroke: none,
   fill: none,
-  parameters: ($theta$, $h$, $epsilon$, $M$),
+  parameters: ($theta: "position"$, $epsilon: "step-size"$, $T: "max tree depth"$),
  )[
     $rho ~ N(0,I_(d times d))$ #comment[refresh momentum]\
-    $B ~ "Unif"({0,1}^M)$ #comment[resample Bernoulli process]\
+    $B ~ "Unif"({0,1}^T)$ #comment[resample Bernoulli process]\
     $(a,b,\_) <-$ #smallcaps("orbit-select") $(theta, rho, B, epsilon)$\
     $(theta^*,\_,\_) <-$ #smallcaps("index-select") $(theta, rho, a, b, epsilon)$\
     return $theta^*$
@@ -687,10 +710,10 @@ $
   parameters: ($theta$, $rho$, $B$, $epsilon$),
  )[
     $a,b <- 0$\
-    for $i$ from 0 to len($B$):#i\
+    for $i$ from 0 to $T$:#i\
       $tilde(a) <- a + (-1)^(B_i)2^(i-1), tilde(b) <- b + (-1)^(B_i)2^(i-1)$ #comment[tree doubling]\
       $II_("U-Turn") <-$ #smallcaps("u-turn") $(a,b,theta,rho,epsilon)$\
-      $II_("Sub-U-Turn") <-$ #smallcaps("sub-u-turn") $(tilde(a), tilde(b), theta, rho, epsilon)$\
+      $II_("Sub-U-Turn") <-$ #smallcaps("sub-u-turn") $(tilde(a), tilde(b), theta, rho, epsilon)$#comment[recursive U-turn checks]\
       if $max(II_("U-Turn"),II_("Sub-U-Turn"))=0$:#i\
         $a <- min(a,tilde(a)), b <- max(b,tilde(b))$#d\
       else:#i\
@@ -769,7 +792,6 @@ $
     content((0,-0.25), [$a$], anchor: "north")
     content((2,-0.25), [$b$], anchor: "north")
 
-
     circle((0,-2), radius: 2pt, fill: black, stroke: none)
     circle((2,-2), radius: 2pt, fill: black, stroke: none)
     circle((6,-2), radius: 2pt, fill: black, stroke: none)
@@ -794,33 +816,7 @@ $
   caption: [Modified NUTS orbit checks]
 )
 
-#algo(
-  line-numbers: false,
-  block-align: none,
-  title: "MassMatrix.update",
-  stroke: none,
-  fill: none,
-  parameters: ($dash(x)_n$, $r$),
- )[
-    def update(self, position, score):#i\
-        $dash(x)_n <- dash(x)_(n-1) + 1/n (x_n - dash(x)_(n-1))$\
-        $hat(sigma)^2_n <- (1/(n-1)) hat(sigma)^2_(n-1) + (x_n - dash(x)_(n-1))^2$\
-        return $sigma^2$#d\
-    def current(self) -> MassMatrix:
-        ...
-    def num_points(self) -> int:
-        ...
- ]
-
-class StepSizeAdapt:
-    def reset(self):
-        ...
-    def update(self, accept_statistic):
-        ...
-    def current_warmup(self) -> float:
-        ...
-    def current_best(self) -> float:
-        ...
+#pagebreak()
 
 ```python
 def warmup(num_warmup, num_early, num_late, early_switch_freq, late_switch_freq):
@@ -865,5 +861,4 @@ def warmup(num_warmup, num_early, num_late, early_switch_freq, late_switch_freq)
             background_window = MassMatrixEstimator()
             if first_mass_matrix:
                 step_size_estimator.reset()
-            first_mass_matrix = False
-```
+            first_mass_matrix = False```
