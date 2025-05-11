@@ -63,38 +63,27 @@
 	file = {Costa et al. - 2014 - Fisher information distance a geometrical reading.pdf:/home/adr/Zotero/storage/LKAT8IA7/Costa et al. - 2014 - Fisher information distance a geometrical reading.pdf:application/pdf},
 }
 
-@misc{neal_mcmc_2012,
-	title = {{MCMC} using Hamiltonian dynamics},
-	url = {http://arxiv.org/abs/1206.1901},
-	doi = {10.48550/arXiv.1206.1901},
-	abstract = {Hamiltonian dynamics can be used to produce distant proposals for the Metropolis algorithm, thereby avoiding the slow exploration of the state space that results from the diffusive behaviour of simple random-walk proposals. Though originating in physics, Hamiltonian dynamics can be applied to most problems with continuous state spaces by simply introducing fictitious "momentum" variables. A key to its usefulness is that Hamiltonian dynamics preserves volume, and its trajectories can thus be used to define complex mappings without the need to account for a hard-to-compute Jacobian factor - a property that can be exactly maintained even when the dynamics is approximated by discretizing time. In this review, I discuss theoretical and practical aspects of Hamiltonian Monte Carlo, and present some of its variations, including using windows of states for deciding on acceptance or rejection, computing trajectories using fast approximations, tempering during the course of a trajectory to handle isolated modes, and short-cut methods that prevent useless trajectories from taking much computation time.},
-	number = {{arXiv}:1206.1901},
-	publisher = {{arXiv}},
-	author = {Neal, Radford M.},
-	urldate = {2024-11-26},
-	date = {2012-06-09},
-	eprinttype = {arxiv},
-	eprint = {1206.1901},
-	keywords = {Physics - Computational Physics, Statistics - Computation},
-	file = {Preprint PDF:/home/adr/Zotero/storage/ZJD3J6B5/Neal - 2012 - MCMC using Hamiltonian dynamics.pdf:application/pdf;Snapshot:/home/adr/Zotero/storage/62MFFFFN/1206.html:text/html},
+@article{neal2011mcmc,
+  title={MCMC using Hamiltonian dynamics},
+  author={Neal, Radford M and others},
+  journal={Handbook of markov chain monte carlo},
+  volume={2},
+  number={11},
+  pages={2},
+  year={2011},
+  publisher={Chapman and Hall/CRC}
 }
 
-@misc{tran_tuning_2024,
-	title = {Tuning diagonal scale matrices for {HMC}},
-	url = {http://arxiv.org/abs/2403.07495},
-	doi = {10.48550/arXiv.2403.07495},
-	abstract = {Three approaches for adaptively tuning diagonal scale matrices for {HMC} are discussed and compared. The common practice of scaling according to estimated marginal standard deviations is taken as a benchmark. Scaling according to the mean log-target gradient ({ISG}), and a scaling method targeting that the frequency of when the underlying Hamiltonian dynamics crosses the respective medians should be uniform across dimensions, are taken as alternatives. Numerical studies suggest that the {ISG} method leads in many cases to more efficient sampling than the benchmark, in particular in cases with strong correlations or non-linear dependencies. The {ISG} method is also easy to implement, computationally cheap and would be relatively simple to include in automatically tuned codes as an alternative to the benchmark practice.},
-	number = {{arXiv}:2403.07495},
-	publisher = {{arXiv}},
-	author = {Tran, Jimmy Huy and Kleppe, Tore Selland},
-	urldate = {2024-11-26},
-	date = {2024-03-12},
-	eprinttype = {arxiv},
-	eprint = {2403.07495},
-	keywords = {Statistics - Computation, Statistics - Machine Learning, Statistics - Methodology},
-	file = {Preprint PDF:/home/adr/Zotero/storage/LSI9MEZW/Tran and Kleppe - 2024 - Tuning diagonal scale matrices for HMC.pdf:application/pdf;Snapshot:/home/adr/Zotero/storage/EJ48D3WM/2403.html:text/html},
+@article{tran_tuning_2024,
+  title={Tuning diagonal scale matrices for HMC},
+  author={Tran, Jimmy Huy and Kleppe, Tore Selland},
+  journal={Statistics and Computing},
+  volume={34},
+  number={6},
+  pages={196},
+  year={2024},
+  publisher={Springer}
 }
-
 @incollection{nielsen_riemannian_2013,
 	location = {Berlin, Heidelberg},
 	title = {The Riemannian Mean of Positive Matrices},
@@ -138,14 +127,14 @@
   doi = {10.18637/jss.v076.i01}
 }
 
-@misc{hoffman_nuts_2011,
-      title={The No-U-Turn Sampler: Adaptively Setting Path Lengths in Hamiltonian Monte Carlo}, 
-      author={Matthew D. Hoffman and Andrew Gelman},
-      year={2011},
-      eprint={1111.4246},
-      archivePrefix={arXiv},
-      primaryClass={stat.CO},
-      url={https://arxiv.org/abs/1111.4246}, 
+@article{hoffman2014no,
+  title={The No-U-Turn sampler: adaptively setting path lengths in Hamiltonian Monte Carlo.},
+  author={Hoffman, Matthew D and Gelman, Andrew},
+  journal={J. Mach. Learn. Res.},
+  volume={15},
+  number={1},
+  pages={1593--1623},
+  year={2014}
 }
 
 @misc{magnusson_posteriordb_2024,
@@ -166,4 +155,30 @@
       archivePrefix={arXiv},
       primaryClass={stat.CO},
       url={https://arxiv.org/abs/1507.08050}, 
+}
+
+@misc{hird_quantifying_2024,
+      title={Quantifying the effectiveness of linear preconditioning in Markov chain Monte Carlo}, 
+      author={Max Hird and Samuel Livingstone},
+      year={2024},
+      eprint={2312.04898},
+      archivePrefix={arXiv},
+      primaryClass={stat.CO},
+      url={https://arxiv.org/abs/2312.04898}, 
+}
+
+@misc{betancourt_conceptual_2018,
+      title={A Conceptual Introduction to Hamiltonian Monte Carlo}, 
+      author={Michael Betancourt},
+      year={2018},
+      eprint={1701.02434},
+      archivePrefix={arXiv},
+      primaryClass={stat.ME},
+      url={https://arxiv.org/abs/1701.02434}, 
+}
+
+@article{beskos2013optimal,
+  title={Optimal tuning of the hybrid Monte Carlo algorithm},
+  author={Beskos, Alexandros and Pillai, Natesh and Roberts, Gareth and Sanz-Serna, Jesus-Maria and Stuart, Andrew},
+  year={2013}
 }

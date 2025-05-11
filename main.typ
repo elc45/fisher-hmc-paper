@@ -12,7 +12,7 @@
 #show: arkheion.with(
   title: [
     If Only My Posterior Were Normal:\
-    Introducing Fisher HMC
+    Fisher-Informed Hamiltonian Monte Carlo
   ],
   authors: (
     (
@@ -34,27 +34,23 @@
   ),
   
   abstract: [
-    Hamiltonian Monte Carlo (HMC) is a powerful tool for Bayesian inference, as
-    it can explore complex and high-dimensional parameter spaces. But HMC's
-    performance is highly sensitive to the geometry of the posterior
-    distribution, which is often poorly approximated by traditional mass matrix
-    adaptations, especially in cases of non-normal or correlated posteriors. We
+    Although Hamiltonian Monte Carlo (HMC) scales well in dimension $(O(N^("5/4")))$, 
+    traditional adaptation methods converge slowly to weak diagonal preconditioners 
+    and scale poorly when expanded to dense preconditioners. We
     propose Fisher HMC, an adaptive framework that uses the Fisher divergence to
-    guide transformations of the parameter space. It generalizes mass matrix
-    adaptation from affine functions to arbitrary diffeomorphisms. By aligning
-    the score function of the transformed posterior with those of a standard
+    guide transformations of the parameter space. By aligning the score function of 
+    the transformed posterior with those of a standard
     normal distribution, our method identifies transformations that adapt to the
-    posterior's scale and shape. We develop theoretical foundations efficient
-    implementation strategies, and demonstrate significant sampling
-    improvements. Our implementation, nutpie, integrates with PyMC and Stan and
-    delivers better efficiency compared to existing samplers.
+    posterior's scale and shape. We develop theoretical foundations with efficient
+    implementation strategies exhibiting substantial sampling
+    improvements over vanilla HMC. Our implementation, nutpie, integrates with PyMC 
+    and Stan and delivers better efficiency compared to existing samplers.
   ],
   keywords: (
-    "Bayesian Inference",
-    "Hamiltonian Monte Carlo",
-    "Mass Matrix Adaptation",
-    "Normalizing Flows",
-    "Fisher Divergence",
+    "Bayesian inference",
+    "Hamiltonian monte carlo",
+    "mass matrix adaptation",
+    "Fisher divergence",
   ),
   date: datetime.today().display(),
 )
@@ -90,15 +86,16 @@
 
 Hamiltonian Monte Carlo (HMC) is a powerful Markov Chain Monte Carlo (MCMC)
 method widely used in Bayesian inference for sampling from complex posterior
-distributions. HMC can explore high-dimensional parameter spaces more
-efficiently than traditional MCMC techniques, which makes it popular in
+distributions #cite(<betancourt_conceptual_2018>). HMC can explore high-dimensional parameter spaces more
+efficiently both in theory and practice than traditional MCMC techniques such as 
+Metropolis-Hastings or the Gibbs sampler, making it popular in
 probabilistic programming libraries like Stan #cite(<carpenter_stan_2017>) and 
 PyMC #cite(<pymc_2015>). However, the performance
-of HMC depends critically on the parameterization of the posterior space. Modern
-samplers automate a part of these reparametrizations by adapting a "mass matrix"
-in the warmup phase of sampling. A common approach in HMC is to estimate a mass 
-matrix based on the inverse of the posterior covariance, typically in a diagonalized 
-form, to adjust for differences in scale across dimensions. We can think of this as a
+of HMC is highly sensitive to the geometry of the posterior, which can be changed through 
+model parameterizations. Current state of the art samplers in wide use automate a part 
+of these reparametrizations by adapting a "mass matrix" in the warmup phase of sampling. A common approach in HMC 
+is to estimate a mass matrix based on the inverse of the posterior covariance, typically 
+in a diagonalized form, to adjust for differences in scale across dimensions. We can think of this as a
 reparametrization that simply rescales the parameters such that they have a
 posterior variance of one. It is not obvious, however, that this is the best
 rescaling that can be done. Morever, even a well-tuned mass
@@ -115,12 +112,11 @@ datasets.
 To address these limitations, we propose an adaptive HMC framework that extends
 beyond the traditional concept of a mass matrix: instead of just rescaling
 variables, we allow for arbitrary diffeomorphisms that dynamically transform the
-parameter space. We use the Fisher divergence as a criterion to choose between
-different transformations, which allows us to adapt the geometry of the
-posterior space in a way that optimizes HMC's efficiency. By aligning the scores
-(derivatives of the log-density) of the transformed posterior with those of a
-standard normal distribution, we approximate an idealized parameterization that
-facilitates efficient sampling. In the first section, we motivate why the scores 
+parameter space. Specifically, we find transformations such that when applied 
+to our observed scores, the resulting transformed scores most closely align with 
+those from a standard normal distribution. We use the Fisher divergence as a criterion 
+to optimize from a class of linear transformations, of which we discuss three. In this way, 
+we approximate an idealized parameterization facilitates efficient sampling. In the first section, we motivate why the scores 
 are useful for for Hamiltonian dynamics. We then present the Fisher divergence as a 
 metric by which we can assess the transformations of target distributions, deriving 
 closed-form solutions for optimal diffeomorphisms in the affine case, i.e. mass matrices.
@@ -134,63 +130,61 @@ software implementations, which complement gradient-based adaptation.
 <motivation-gaussian>
 
 HMC is a gradient-based method, meaning that the algorithm computes the 
-derivatives of the log posterior density (the scores). While these gradients 
+derivatives of the log posterior density, or scores. While these gradients 
 contain significant information about the target density, traditional methods of 
 mass matrix adaptation ignore them. To illustrate how useful the scores can be, 
-consider a standard normal posterior $N (mu , sigma^2)$ with density $p(x) prop exp(-(x - mu)^2/sigma^2)$.
-Let's assume we have two posterior draws $x_1$ and $x_2$, together
+consider a standard normal posterior with density $p(theta) prop exp(-(theta - mu)^2/sigma^2)$.
+Assume we have two posterior draws $theta_1$ and $theta_2$, together
 with the covector of scores
 $
-  alpha_i = frac(diff, diff x_i) log p(x_i) = sigma^(-2) (mu - x_i).
+  alpha_i = frac(diff, diff theta_i) log p(theta_i) = sigma^(-2) (mu - theta_i).
 $
 
 Based on this information alone, we can directly compute $mu$ and $sigma$ to identify
 the exact posterior. Solving for $mu$ and $sigma$, we get
 
 $
-  mu = dash(x) + sigma^2 dash(alpha) quad "and" quad sigma^2 = var(x_i)^(1/2) var(alpha_i)^(-1/2),
+  mu = dash(theta) + sigma^2 dash(alpha) quad "and" quad sigma^2 = var(theta_i)^(1/2) var(alpha_i)^(-1/2),
 $
-where $dash(x)$ and $dash(alpha)$ are the sample means of $x_i$ and $alpha_i$,
+where $dash(theta)$ and $dash(alpha)$ are the sample means of $theta_i$ and $alpha_i$,
 respectively. If we take advantage of the scores, we can compute the exact
-posterior and thus an optimal mass matrix with no sample variance, based on just two draws!
-
+posterior and thus an optimal mass matrix with no sample variance, based on just two draws. 
 This generalizes directly to multivariate normal posteriors $N(mu, Sigma)$, where we can leverage
-the elegant fact that the scores are normally distributed with covariance $Sigma^(-1)$.
-Assume we have $N + 1$ linearly independent draws $x_i in RR^N$ with scores 
-$alpha_i = Sigma^(-1) (x_i - mu)$. The mean of these equations gives us
-$mu = dash(x) - Sigma dash(alpha)$. It follows that $Sigma^(-1) X = S$, where
-the i-th column of $S$ is $alpha_i - dash(alpha)$, and the i-th column of $X$ is
-$x_i - dash(x)$. Finally, we have 
+the fact that the scores are normally distributed with covariance $Sigma^(-1)$.
+Assume we have $N + 1$ linearly independent draws $theta_i in RR^N$ with scores 
+$alpha_i = Sigma^(-1) (theta_i - mu)$. The mean of these equations gives us
+$mu = dash(theta) - Sigma dash(alpha)$. It follows that $Sigma^(-1) theta = S$, where
+column $i$ of $S$ is $alpha_i - dash(alpha)$, and column $i$ of $theta$ is
+$theta_i - dash(theta)$. Finally, we have 
 $
-  S S^T = cov(alpha_i) = Sigma^(- 1) X X^T Sigma^(-1) = Sigma^(-1) cov(x_i) Sigma^(- 1)
+  S S^T = cov(alpha_i) = Sigma^(- 1) theta theta^T Sigma^(-1) = Sigma^(-1) cov(theta_i) Sigma^(- 1)
 $
 and we can recover $Sigma$ as the
-geometric mean of the positive symmetric matrices $cov(x_i)$ and
+geometric mean of the positive symmetric matrices $cov(theta_i)$ and
 $cov(s_i)^(-1)$:
 $
-  Sigma = cov(x_i)^(-1/2)(cov(x_i)^(1/2)cov(alpha_i)cov(x_i)^(1/2))^(1/2)cov(x_i)^(-1/2)
+  Sigma = cov(theta_i)^(-1/2)(cov(theta_i)^(1/2)cov(alpha_i)cov(theta_i)^(1/2))^(1/2)cov(theta_i)^(-1/2)
 $
 In this way we can compute the parameters of the normal distribution
-exactly. Of course, most posterior distributions of interest are not multivariate normal, and if they were, we 
+exactly. Of course, most posterior distributions of interest are not multivariate normal; moreover if they were, we 
 would not have to run MCMC in the first place. But it is common in Bayesian inference for the posterior
 to approximate a normal distribution reasonably well, which suggests that the
 scores contain useful information that is ignored in standard methods.
 
 == Transformed HMC
 <transformed-hmc>
-When we manually reparameterize a model to make HMC more efficient, we try to
-find a transformation of our posterior such that HMC performs better on it. Formally, 
-if our posterior $mu$ is defined on a space $M$, we try to find a
+Reparameterizing a model is akin to transforming a posterior such that HMC performs 
+better on it. Formally, if our posterior $mu$ is defined on a space $M$, we try to find a
 diffeomorphism $f: N arrow M$ such that the transformed posterior $f^*mu$ is well-behaved with respect to some property. 
 Note that we define the transformation as a function
 #emph[from] the transformed space #emph[to] the original posterior, in keeping
-consistent with the Normalizing Flow literature.#footnote[Since the transformation 
+consistent with the normalizing flow literature.#footnote[Since the transformation 
 is a bijection, we can choose any direction we want, as long as we stay consistent
 with our choice.] $f^* mu$ refers to the pullback of the posterior (which we can 
 interpret as a volume form), i.e. we #emph[pull it back] to the space $N$ along the 
 transformation $f$. If $f$ is an affine transformation, this simplifies to mass matrix-based 
-HMC, wherein choosing $f(x) = Sigma^(1/2)x + mu$ corresponds to the
-mass matrix $Sigma^(-1)$, as described in more detail in #cite(<neal_mcmc_2012>, form: "prose"). In 
+HMC, wherein choosing $f(x) = Sigma^("1/2")x + mu$ corresponds to the
+mass matrix $Sigma^(-1)$, as described in more detail in #cite(<neal2011mcmc>, form: "prose"). In 
 standard implementations, $Sigma^(-1)$ appears in full in the leapfrog 
 integrator:
 
@@ -297,7 +291,7 @@ density directly, but rather only on the scores. Therefore, a reasonable
 loss function might assess how well the transformed space's #emph[scores] align with
 those of our desired transformed posterior. We choose the standard normal distribution 
 as the ideal transformed posterior, since we know that HMC is efficient in this case, 
-given the nice Gaussian properties such as constant curvature. 
+given nice properties such as constant curvature. 
 This still leaves open the choice of a specific norm for
 comparing the scores of the standard normal with those of the
 transformed posterior. But since the standard normal distribution is defined in
@@ -330,27 +324,29 @@ and $omega_2$ is the standard normal distribution.
 == Affine choices for the diffeomorphism
 <diffeomorphism-choices>
 
-We focus on three families of affine diffeomorphisms $F$, for which derive specific results.
+We focus on three families of affine diffeomorphisms $F$, for which we derive specific results.
 
 === Diagonal mass matrix
 <diagonal-mass-matrix>
 
-If we choose $f_(sigma , mu) : Y arrow X$ as $x arrow.bar y dot.circle sigma +
-mu$, we are doing diagonal mass matrix estimation. In this case, 
-the sample Fisher divergence reduces to
+Assuming a diffeomorphism of the form $f_(sigma , mu) : Z arrow X$ as $x arrow.bar z dot.circle sigma +
+mu$ is equivalent to using a diagonal preconditioner. Recall that here $Z$ follows a 
+standard normal distribution, and $X$ is the target. Given a set of draws $theta_i$ and 
+corresponding scores $alpha_i$ from $X$, the aim is to find $sigma, mu$ which minimize the sample Fisher 
+divergence between $f_(sigma, mu)^*X$ and $Z$. In this case the sample divergence reduces to
 
 $
-  hat(cal(F))_(sigma , mu)(f^*X, N(0,I_d)) = 1 / N sum_i norm(sigma dot.circle alpha_i
-  + sigma^(-1) dot.circle (x_i - mu))^2
+  hat(cal(F))(f_(sigma, mu)^*X, N(0,I_d)) = 1 / N sum_(i=1)^N norm(sigma dot.circle alpha_i
+  + sigma^(-1) dot.circle (theta_i - mu))^2
 $
 
-This is a special case of affine transformation and minimal at $sigma^* = var(x_i)^(1/2)
-var(alpha_i)^(-1/2)$ and $mu^* = dash(x)_i + sigma^2 dash(s)_i$, corresponding to 
-the result in #ref(<motivation-gaussian>). This solution is very computationally 
-inexpensive, and is hence the default in nutpie. Using Welford's algorithm 
-to keep online estimates of the draw and score variances during sampling (thereby avoiding the 
-need to explicity store scores), the mass matrix is set to a diagonal matrix with 
-the $i$'th entry on the diagonal equal to $var(x_i)^(1/2)var(alpha_i)^(-1/2)$.
+which is minimal at 
+$sigma^* = var(theta_i)^(1/2) var(alpha_i)^(-1/2)$ and $mu^* = dash(theta)_i + sigma^2 dash(s)_i$, 
+corresponding to the result in #ref(<motivation-gaussian>). The resulting 
+transformation corresponds to a diagonal mass matrix with entry $i$ equal 
+to $var(theta_i)^(1/2)var(alpha_i)^(-1/2)$. Since HMC is translation invariant, we 
+discard $mu$. The computation of this solution is linear in the posterior dimension and is hence the default in nutpie. Online estimates of the 
+draw and score variances are kept during sampling using Welford's algorithm.
 
 If our target density is $N(mu , Sigma)$, then the minimizers $mu^*$ and
 $sigma^*$ of $hat(cal(F))$ derived above converge to $mu$ and $exp (1/2 log diag(Sigma) -
@@ -365,7 +361,7 @@ $sum lambda_i^(- 1)$ and only penalize small eigenvalues. But based on theoretic
 results for multivariate normal posteriors in #cite(<langmore_condition_2020>, form: "prose"), 
 we know that both large and small eigenvalues make HMC less efficient. We can use this 
 result to evaluate the different diagonal mass
-matrix choices on various gaussian posteriors, with different numbers of
+matrix choices on various normal posteriors, with different numbers of
 observations. Figure todo shows the resulting condition numbers of the posterior
 as seen by the sampler in the transformed space.
 
@@ -463,7 +459,7 @@ also makes the initialization independent of variable scaling.
 <accelerated-window-based-adaptation-warmuptuning-scheme>
 
 Most widely used HMC implementations do not run vanilla HMC, but variants, most notably the 
-No-U-Turn Sampler (NUTS) #cite(<hoffman_nuts_2011>), where 
+No-U-Turn Sampler (NUTS) #cite(<hoffman2014no>), where 
 the length of the Hamiltonian trajectory is chosen dynamically (see #ref(<appendix-nuts>)). Such schemas can make 
 it extremely costly to generate draws with a poor mass matrix, because in these cases the 
 algorithm can take a huge number of HMC steps for each draw (typically up to 1000). Thus 
